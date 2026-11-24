@@ -492,40 +492,38 @@ print_java_timestamp (FILE * fp, const char *value)
   fprintf (fp, "%s", zone);
 }
 
+/*
+ * An element of a collection, as cqt prints it: by the type of the elements, not by how the text
+ * looks. FLOAT and DOUBLE as Float.toString/Double.toString, the TIMESTAMP and DATETIME kinds as
+ * Timestamp.toString, and every other type (NUMERIC included) as CCI gives it.
+ */
 void
-formatdatetime (FILE * fp, char *buffer)
+print_set_element (FILE * fp, T_CCI_SET set, int index, const char *value)
 {
-  int _position = chrindex (buffer, "-");
-  int dot_position = chrindex (buffer, ".");
-  int length = strlen (buffer);
-  int allzero = 1;
-  char *p;
-  int i;
+  int u_type = cci_set_element_type (set);
+  char buf[64];
+  float f;
+  double d;
+  int ind;
 
-  for (i = dot_position + 1; i < length; i++)
+  if (u_type == CCI_U_TYPE_FLOAT && cci_set_get (set, index, CCI_A_TYPE_FLOAT, &f, &ind) >= 0 && ind >= 0)
     {
-      if (buffer[i] != '0')
-	{
-	  allzero = 0;
-	  break;
-	}
+      java_number_str (buf, sizeof (buf), f, 1);
+      fprintf (fp, "%s", buf);
     }
-
-  if (allzero)
+  else if ((u_type == CCI_U_TYPE_DOUBLE || u_type == CCI_U_TYPE_MONETARY)
+	   && cci_set_get (set, index, CCI_A_TYPE_DOUBLE, &d, &ind) >= 0 && ind >= 0)
     {
-      if (_position > -1 && dot_position > -1 && dot_position < length)
-	{
-	  p = (char *) malloc ((length + 1) * sizeof (char));
-	  memcpy (p, buffer, (length + 1) * sizeof (char));
-	  p[dot_position + 1] = '0';
-	  p[dot_position + 2] = 0;
-	  fprintf (fp, "%s", p);
-	  free (p);
-	}
+      java_number_str (buf, sizeof (buf), d, 0);
+      fprintf (fp, "%s", buf);
+    }
+  else if (is_timestamp_type (u_type))
+    {
+      print_java_timestamp (fp, value);
     }
   else
     {
-      fprintf (fp, "%s", buffer);
+      fprintf (fp, "%s", value);
     }
 }
 
@@ -582,139 +580,6 @@ trimnumeric (FILE * fp, char *buffer)
 	  p[dot_position + 11] = 0;
 	}
     }
-  fprintf (fp, "%s", p);
-  free (p);
-}
-
-void
-trimdouble (FILE * fp, char *buffer)
-{
-  int dot_position = chrindex (buffer, ".");
-  int length = strlen (buffer);
-  int allzero = 1;
-  int i;
-  char *p;
-  p = (char *) malloc ((length + 1) * sizeof (char));
-  memcpy (p, buffer, (length + 1) * sizeof (char));
-
-  if (!isdouble (p))
-    {
-      printf ("wrong date %s", p);
-    }
-
-  if (dot_position < 1)
-    {
-      fprintf (fp, "%s", p);
-      free (p);
-      return;
-    }
-
-  for (i = dot_position + 1; i < length; i++)
-    {
-      if (buffer[i] != '0')
-	{
-	  allzero = 0;
-	  break;
-	}
-    }
-
-  if (allzero && length < 20)
-    {
-      p[dot_position + 1] = '0';
-      p[dot_position + 2] = 0;
-      fprintf (fp, "%s", p);
-      free (p);
-      return;
-    }
-
-  if (length > 19)
-    {
-      sprintf (p, "%le", atof (buffer));
-    }
-  else
-    {
-      if ((length - dot_position - 1) > 0)
-	{
-	  for (i = length - 1; i > dot_position; i--)
-	    {
-	      if (p[i] == '0')
-		continue;
-	      else
-		break;
-	    }
-	  p[i + 1] = 0;
-	}
-    }
-  fprintf (fp, "%s", p);
-  free (p);
-}
-
-void
-trimfloat (FILE * fp, char *buffer)
-{
-  int dot_position = chrindex (buffer, ".");
-  int length = strlen (buffer);
-  int allzero = 1;
-  int i;
-  char *p;
-  p = (char *) malloc ((length + 1) * sizeof (char));
-  memcpy (p, buffer, (length + 1) * sizeof (char));
-
-  if (!isdouble (p))
-    {
-      printf ("wrong date %s", p);
-    }
-
-  if (dot_position < 1)
-    {
-      fprintf (fp, "%s", p);
-      free (p);
-      return;
-    }
-
-  for (i = dot_position + 1; i < length; i++)
-    {
-      if (buffer[i] != '0')
-	{
-	  allzero = 0;
-	  break;
-	}
-    }
-
-  if (allzero && length < 20)
-    {
-      p[dot_position + 1] = '0';
-      p[dot_position + 2] = 0;
-      fprintf (fp, "%s", p);
-      free (p);
-      return;
-    }
-
-  if (length > 19)
-    {
-      sprintf (p, "%le", atof (buffer));
-    }
-  else
-    {
-      while (--length > dot_position)
-	{
-	  if (buffer[length] == '0')
-	    {
-	      continue;
-	    }
-	  else
-	    break;
-	}
-    }
-  if (dot_position == length)
-    {
-      length++;
-      p[length] = '0';
-    }
-
-  if (length < strlen (buffer))
-    p[length + 1] = 0x00;
-
   fprintf (fp, "%s", p);
   free (p);
 }
@@ -1736,18 +1601,10 @@ _NEXT_MULTIPLE_LINE_SQL:
 				}
 			      fprintf (fp, "%s", class_str);
 			    }
-			  else if (isdouble ((char *) bufferset))
-			    {
-			      trimdouble (fp, (char *) bufferset);
-			    }
-			  else if ((chrindex ((char *) bufferset, "-") > 0) && (chrindex ((char *) bufferset, ":") > 0))
-			    {
-			      fprintf (fp, "%s", (char *) bufferset);
-			      fprintf (fp, ".0");
-			    }
 			  else
 			    {
-			      fprintf (fp, "%s", (char *) bufferset);
+			      /* an element prints as cqt prints a column of its type */
+			      print_set_element (fp, buffer, index_set, (char *) bufferset);
 			    }
 			}
 		      fprintf (fp, ",");
