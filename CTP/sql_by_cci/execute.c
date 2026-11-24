@@ -28,6 +28,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <strings.h>
 #include <cas_cci.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -91,6 +92,28 @@ static FILE *result_recorder = NULL;
 static SqlStateStruce sqlstate[MAX_SQL_NUM];
 
 static bool is_server_message_on = 0;
+
+/* the statement being run, for the checks that depend on its text */
+static const char *current_sql = NULL;
+
+/*
+ * cqt asks for the plan of a statement in a .queryPlan case only when its text starts with SELECT
+ * (ConsoleDAO: script.trim().toUpperCase().startsWith("SELECT")), so EXECUTE, SHOW, WITH and a
+ * statement that starts with '(' or a comment get no plan. Do the same, so the answers agree.
+ */
+static int
+starts_with_select (const char *sql)
+{
+  if (sql == NULL)
+    {
+      return 0;
+    }
+  while (*sql == ' ' || *sql == '\t' || *sql == '\r' || *sql == '\n')
+    {
+      sql++;
+    }
+  return strncasecmp (sql, "SELECT", 6) == 0;
+}
 
 char *
 get_err_msg (int err_code)
@@ -1456,7 +1479,7 @@ _NEXT_MULTIPLE_LINE_SQL:
   if (res == CCI_ER_NO_MORE_DATA)
     {
       fprintf (fp, "\n");
-      if (queryplan || hasqueryplan)
+      if ((queryplan && starts_with_select (current_sql)) || hasqueryplan)
 	{
 	  goto _PRINT_QUERY_PLAN;
 	}
@@ -1659,7 +1682,7 @@ _NEXT_MULTIPLE_LINE_SQL:
       if (res == CCI_ER_NO_MORE_DATA)
 	{
 	  fprintf (fp, "\n");
-	  if (queryplan || hasqueryplan)
+	  if ((queryplan && starts_with_select (current_sql)) || hasqueryplan)
 	    {
 	      res = cci_get_query_plan (req, &plan);
 	      {
@@ -1982,6 +2005,8 @@ execute (FILE * fp, char conn, const SqlStateStruce *pSqlState)
   char *server_output_buffer = NULL;
   char *sql = pSqlState->sql;
   bool hasqueryplan = pSqlState->hasqp;
+
+  current_sql = sql;
   bool onlyjoingraph = pSqlState->onlyjg;
   bool hasfullplan = pSqlState->hasfullp;
   bool executed = false;
@@ -2124,6 +2149,8 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
   char *server_output_buffer = NULL;
   char *sql = pSqlState->sql;
   bool hasqueryplan = pSqlState->hasqp;
+
+  current_sql = sql;
   bool onlyjoingraph = pSqlState->onlyjg;
   bool hasfullplan = pSqlState->hasfullp;
   bool iscall = pSqlState->iscallwithoutvalue;
