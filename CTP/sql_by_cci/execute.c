@@ -93,6 +93,26 @@ static SqlStateStruce sqlstate[MAX_SQL_NUM];
 
 static bool is_server_message_on = 0;
 
+#ifndef CCI_ER_NOT_BIND
+#define CCI_ER_NOT_BIND -20011
+#endif
+#define JDBC_ER_NOT_BIND -21007
+#define JDBC_ER_NOT_BIND_MSG "Attempt to execute the query when not all the parameters are binded"
+
+/*
+ * CCI refuses a statement whose parameters are not all bound with CCI_ER_NOT_BIND (-20011, APIS-1143),
+ * where JDBC gives -21007. Print the error the way the JDBC answer files have it.
+ */
+static void
+map_not_bind_error (T_CCI_ERROR * error)
+{
+  if (error->err_code == CCI_ER_NOT_BIND)
+    {
+      error->err_code = JDBC_ER_NOT_BIND;
+      snprintf (error->err_msg, sizeof (error->err_msg), "%s", JDBC_ER_NOT_BIND_MSG);
+    }
+}
+
 /* the statement being run, for the checks that depend on its text */
 static const char *current_sql = NULL;
 
@@ -944,7 +964,8 @@ executebindparameter (int req, char *str, int n)
   int parLen = ParStrLen (str, '$');
   T_CCI_BIT value;
 
-  if (parLen / 2 != n)
+  /* fewer values than parameters: bind the ones given and let cci_execute() refuse the rest, as JDBC does */
+  if (parLen / 2 > n)
     return 0;
 
   p = strtok (str, split);
@@ -2036,6 +2057,7 @@ execute (FILE * fp, char conn, const SqlStateStruce *pSqlState)
   if (res < 0)
     {
       fprintf (stdout, "Error:%d\n", error.err_code);
+      map_not_bind_error (&error);
       fprintf (fp, "Error:%d\n", error.err_code);
       if (is_server_message_on)
 	{
@@ -2208,6 +2230,7 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
   if (res < 0)
     {
       fprintf (stdout, "Error:%d\n", error.err_code);
+      map_not_bind_error (&error);
       fprintf (fp, "Error:%d\n", error.err_code);
       if (is_server_message_on)
 	{
