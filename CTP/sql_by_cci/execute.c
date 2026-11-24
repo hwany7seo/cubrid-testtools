@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <strings.h>
+#include <math.h>
 #include <cas_cci.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -323,6 +324,121 @@ isdouble (char *buffer)
 	return 0;
     }
   return 1;
+}
+
+/*
+ * The text Java gives a float or a double with Float.toString/Double.toString, which cqt prints:
+ * the fewest digits that read back as the same value, written plain when 1e-3 <= |v| < 1e7
+ * ("111.26", "0.001", "1234567.0") and as d.dddEn otherwise ("1.0E7", "1.5E-10").
+ */
+void
+java_number_str (char *out, size_t out_size, double v, int is_float)
+{
+  char buf[64], digits[32];
+  int p, max_p = is_float ? 9 : 17, exp10, nd, i, k;
+  const char *e;
+
+  if (isnan (v))
+    {
+      snprintf (out, out_size, "NaN");
+      return;
+    }
+  if (isinf (v))
+    {
+      snprintf (out, out_size, "%sInfinity", v < 0 ? "-" : "");
+      return;
+    }
+  if (v == 0)
+    {
+      snprintf (out, out_size, "%s0.0", signbit (v) ? "-" : "");
+      return;
+    }
+
+  for (p = 1; p <= max_p; p++)
+    {
+      snprintf (buf, sizeof (buf), "%.*e", p - 1, v);
+      if (is_float ? (strtof (buf, NULL) == (float) v) : (strtod (buf, NULL) == v))
+	{
+	  break;
+	}
+    }
+
+  /* buf is [-]d[.ddd]e[+-]xx */
+  k = 0;
+  for (i = (buf[0] == '-') ? 1 : 0; buf[i] != 'e'; i++)
+    {
+      if (buf[i] != '.')
+	{
+	  digits[k++] = buf[i];
+	}
+    }
+  digits[k] = '\0';
+  while (k > 1 && digits[k - 1] == '0')
+    {
+      digits[--k] = '\0';
+    }
+  nd = k;
+  e = strchr (buf, 'e');
+  exp10 = atoi (e + 1);
+
+  i = 0;
+  if (v < 0)
+    {
+      out[i++] = '-';
+    }
+  if (exp10 >= -3 && exp10 < 7)
+    {
+      if (exp10 >= 0)
+	{
+	  for (k = 0; k <= exp10; k++)
+	    {
+	      out[i++] = k < nd ? digits[k] : '0';
+	    }
+	  out[i++] = '.';
+	  if (nd > exp10 + 1)
+	    {
+	      for (k = exp10 + 1; k < nd; k++)
+		{
+		  out[i++] = digits[k];
+		}
+	    }
+	  else
+	    {
+	      out[i++] = '0';
+	    }
+	}
+      else
+	{
+	  out[i++] = '0';
+	  out[i++] = '.';
+	  for (k = 0; k < -exp10 - 1; k++)
+	    {
+	      out[i++] = '0';
+	    }
+	  for (k = 0; k < nd; k++)
+	    {
+	      out[i++] = digits[k];
+	    }
+	}
+      out[i] = '\0';
+    }
+  else
+    {
+      out[i++] = digits[0];
+      out[i++] = '.';
+      if (nd > 1)
+	{
+	  for (k = 1; k < nd; k++)
+	    {
+	      out[i++] = digits[k];
+	    }
+	}
+      else
+	{
+	  out[i++] = '0';
+	}
+      snprintf (out + i, out_size - i, "E%d", exp10);
+    }
 }
 
 void
@@ -1601,9 +1717,8 @@ _NEXT_MULTIPLE_LINE_SQL:
 		}
 	      else
 		{
-		  sprintf (buffertemp, "%.9f", d_value);
-		  trimdouble (fp, (char *) buffertemp);
-		  fprintf (fp, "     ");
+		  java_number_str (buffertemp, sizeof (buffertemp), d_value, 0);
+		  fprintf (fp, "%s     ", buffertemp);
 		}
 	    }
 	  else if (itemp == CCI_U_TYPE_FLOAT)
@@ -1619,9 +1734,8 @@ _NEXT_MULTIPLE_LINE_SQL:
 		}
 	      else
 		{
-		  sprintf (buffertemp, "%f", f);
-		  trimfloat (fp, (char *) buffertemp);
-		  fprintf (fp, "     ");
+		  java_number_str (buffertemp, sizeof (buffertemp), f, 1);
+		  fprintf (fp, "%s     ", buffertemp);
 		}
 	    }
 	  else
