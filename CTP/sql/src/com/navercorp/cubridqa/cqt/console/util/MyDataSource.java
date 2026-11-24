@@ -78,6 +78,7 @@ public class MyDataSource extends BasicDataSource {
             URLClassLoader classLoader = new URLClassLoader(new URL[] {url});
             Class driverClass = Class.forName(driverClassName, true, classLoader);
             driver = (Driver) driverClass.newInstance();
+            this.url = ZeroDateTimeOption.apply(this.url, classLoader);
         } catch (Throwable t) {
             String message =
                     "Cannot create JDBC driver of class '"

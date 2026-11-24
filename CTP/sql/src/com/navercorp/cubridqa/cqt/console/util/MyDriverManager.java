@@ -74,7 +74,7 @@ public class MyDriverManager {
             if (password != null) {
                 info.put("password", password);
             }
-            connection = driver.connect(dbUrl, info);
+            connection = driver.connect(ZeroDateTimeOption.apply(dbUrl, getURLClassLoader()), info);
             DatabaseMetaData metaData = connection.getMetaData();
             version = metaData.getDatabaseProductVersion();
         } catch (SQLException e) {
