@@ -2431,7 +2431,12 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
     }
 
   res_col_info = cci_get_result_info (req, &cmd_type, &col_count);
-  if (cmd_type == CUBRID_STMT_SELECT || cmd_type == CUBRID_STMT_CALL)
+  /*
+   * A CALL with parameter values runs in cqt through PreparedStatement.execute(), which gives no
+   * result set but an update count, so cqt prints the count (1) and not the return value. A CALL
+   * without parameters runs through Statement and prints its result set, as in execute().
+   */
+  if (cmd_type == CUBRID_STMT_SELECT)
     {
       dumptable (fp, req, conn, hasqueryplan, onlyjoingraph, hasfullplan);
     }
