@@ -852,9 +852,10 @@ getutype (char *p)
     {
       return CCI_U_TYPE_VARBIT;
     }
+  /* cqt binds a NUMERIC value as a Double (CubridUtil.getObject) */
   if (startswithCI (trimline (p) + 1, "NUMERIC"))
     {
-      return CCI_U_TYPE_NUMERIC;
+      return CCI_U_TYPE_DOUBLE;
     }
   if (startswithCI (trimline (p) + 1, "INT"))
     {
@@ -864,9 +865,10 @@ getutype (char *p)
     {
       return CCI_U_TYPE_SHORT;
     }
+  /* cqt binds MONETARY, BIGINT and DATETIME values as text (Types.VARCHAR or setObject of a String) */
   if (startswithCI (trimline (p) + 1, "MONETARY"))
     {
-      return CCI_U_TYPE_MONETARY;
+      return CCI_U_TYPE_STRING;
     }
   if (startswithCI (trimline (p) + 1, "FLOAT"))
     {
@@ -876,17 +878,22 @@ getutype (char *p)
     {
       return CCI_U_TYPE_DOUBLE;
     }
+  /* the longer names first: DATE would take DATETIME, and TIME TIMESTAMP */
+  if (startswithCI (trimline (p) + 1, "DATETIME"))
+    {
+      return CCI_U_TYPE_STRING;
+    }
   if (startswithCI (trimline (p) + 1, "DATE"))
     {
       return CCI_U_TYPE_DATE;
     }
-  if (startswithCI (trimline (p) + 1, "TIME"))
-    {
-      return CCI_U_TYPE_TIME;
-    }
   if (startswithCI (trimline (p) + 1, "TIMESTAMP"))
     {
       return CCI_U_TYPE_TIMESTAMP;
+    }
+  if (startswithCI (trimline (p) + 1, "TIME"))
+    {
+      return CCI_U_TYPE_TIME;
     }
   if (startswithCI (trimline (p) + 1, "SET"))
     {
@@ -910,11 +917,7 @@ getutype (char *p)
     }
   if (startswithCI (trimline (p) + 1, "BIGINT"))
     {
-      return CCI_U_TYPE_BIGINT;
-    }
-  if (startswithCI (trimline (p) + 1, "DATETIME"))
-    {
-      return CCI_U_TYPE_DATETIME;
+      return CCI_U_TYPE_STRING;
     }
   if (startswithCI (trimline (p) + 1, "BLOB"))
     {
@@ -961,18 +964,19 @@ getatype (T_CCI_U_TYPE utype)
       return CCI_A_TYPE_FLOAT;
     case CCI_U_TYPE_DOUBLE:
       return CCI_A_TYPE_DOUBLE;
+    /*
+     * The value of a DATE, TIME, TIMESTAMP, DATETIME or BIGINT parameter is bound as the text of the
+     * script, and the server converts it to the type: executebindparameter() passes the text, not a
+     * T_CCI_DATE or an INT64.
+     */
     case CCI_U_TYPE_DATE:
-      return CCI_A_TYPE_DATE;
     case CCI_U_TYPE_TIME:
-      return CCI_A_TYPE_DATE;
     case CCI_U_TYPE_TIMESTAMP:
-      return CCI_A_TYPE_DATE;
+    case CCI_U_TYPE_DATETIME:
+    case CCI_U_TYPE_BIGINT:
+      return CCI_A_TYPE_STR;
     case CCI_U_TYPE_OBJECT:
       return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_BIGINT:
-      return CCI_A_TYPE_BIGINT;
-    case CCI_U_TYPE_DATETIME:
-      return CCI_A_TYPE_DATE;
     case CCI_U_TYPE_BLOB:
       return CCI_A_TYPE_BLOB;
     case CCI_U_TYPE_CLOB:
