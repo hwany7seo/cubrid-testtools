@@ -1156,6 +1156,48 @@ executebindparameter (int req, char *str, int n)
   return 1;
 }
 
+/*
+ * Opens a script so that a line may end with LF, CR LF or a CR alone, as cqt reads it with
+ * BufferedReader.readLine(). A file written with CR line ends would otherwise be one long line.
+ * The file is read into memory, every CR not followed by LF becomes LF, and the text is read back
+ * through a memory stream.
+ */
+FILE *
+open_script (const char *file_name)
+{
+  FILE *fp = fopen (file_name, "rb");
+  char *text;
+  long size, i;
+
+  if (fp == NULL)
+    {
+      return NULL;
+    }
+  if (fseek (fp, 0, SEEK_END) != 0 || (size = ftell (fp)) < 0 || fseek (fp, 0, SEEK_SET) != 0)
+    {
+      rewind (fp);
+      return fp;
+    }
+  text = (char *) malloc (size + 1);
+  if (text == NULL || (long) fread (text, 1, size, fp) != size)
+    {
+      free (text);
+      rewind (fp);
+      return fp;
+    }
+  fclose (fp);
+  for (i = 0; i < size; i++)
+    {
+      if (text[i] == '\r' && (i + 1 == size || text[i + 1] != '\n'))
+	{
+	  text[i] = '\n';
+	}
+    }
+  text[size] = '\0';
+  /* the buffer lives as long as the process; the script is read once */
+  return size > 0 ? fmemopen (text, size, "r") : fmemopen (text, 1, "r");
+}
+
 int
 readFile (char *fileName)
 {
@@ -1170,7 +1212,7 @@ readFile (char *fileName)
   total_sql = 0;
 
   memset (sql_buf, 0, sizeof (char) * (MAXLINELENGH));
-  if ((sql_file = fopen (fileName, "r")) != NULL)
+  if ((sql_file = open_script (fileName)) != NULL)
     {
       while (fgets (line, MAX_SQL_LEN, sql_file) != NULL)
 	{
