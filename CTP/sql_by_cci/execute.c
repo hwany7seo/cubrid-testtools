@@ -441,6 +441,30 @@ java_number_str (char *out, size_t out_size, double v, int is_float)
     }
 }
 
+/*
+ * A BIT read as a boolean, the way JDBC reads a BIT(8): 1 when its first byte is not 0. A CCI with
+ * CCI_A_TYPE_INT for a BIT (APIS-1143) does it; an older one gives CCI_ER_TYPE_CONVERSION, and the
+ * first byte is then taken from CCI_A_TYPE_BIT.
+ */
+int
+get_bit_as_bool (int req, int col, int *value, int *ind)
+{
+  T_CCI_BIT bit;
+  int res;
+
+  res = cci_get_data (req, col, CCI_A_TYPE_INT, value, ind);
+  if (res != CCI_ER_TYPE_CONVERSION)
+    {
+      return res;
+    }
+  res = cci_get_data (req, col, CCI_A_TYPE_BIT, &bit, ind);
+  if (res >= 0 && *ind >= 0)
+    {
+      *value = (bit.size > 0 && bit.buf[0] != 0) ? 1 : 0;
+    }
+  return res;
+}
+
 /* TIMESTAMP, DATETIME and their time zone kinds: JDBC gives them as java.sql.Timestamp. */
 int
 is_timestamp_type (int u_type)
@@ -1571,6 +1595,19 @@ _NEXT_MULTIPLE_LINE_SQL:
 		  java_number_str (buffertemp, sizeof (buffertemp), d_value, 0);
 		  fprintf (fp, "%s     ", buffertemp);
 		}
+	    }
+	  else if (itemp == CCI_U_TYPE_BIT && CCI_GET_RESULT_INFO_PRECISION (res_col_info, index_count) == 8
+		   && cmd_type != CUBRID_STMT_CALL_SP)
+	    {
+	      /* JDBC reads a BIT(8) as java.lang.Boolean (CUBRID has no BOOLEAN), so cqt prints true or false */
+	      int bit_value = 0;
+
+	      if ((res = get_bit_as_bool (req, index_count, &bit_value, &ind)) < 0)
+		{
+		  fprintf (stdout, "Error:%d\n", res);
+		  goto _DUMPTABLE_ERROR;
+		}
+	      fprintf (fp, "%s     ", ind < 0 ? "null" : (bit_value ? "true" : "false"));
 	    }
 	  else if (itemp == CCI_U_TYPE_FLOAT)
 	    {
