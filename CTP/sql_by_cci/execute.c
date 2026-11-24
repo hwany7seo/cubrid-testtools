@@ -441,6 +441,57 @@ java_number_str (char *out, size_t out_size, double v, int is_float)
     }
 }
 
+/* TIMESTAMP, DATETIME and their time zone kinds: JDBC gives them as java.sql.Timestamp. */
+int
+is_timestamp_type (int u_type)
+{
+  return u_type == CCI_U_TYPE_TIMESTAMP || u_type == CCI_U_TYPE_DATETIME || u_type == CCI_U_TYPE_TIMESTAMPTZ
+    || u_type == CCI_U_TYPE_TIMESTAMPLTZ || u_type == CCI_U_TYPE_DATETIMETZ || u_type == CCI_U_TYPE_DATETIMELTZ;
+}
+
+/*
+ * A TIMESTAMP or DATETIME, with or without a time zone, the way cqt prints it: the date and time as
+ * Timestamp.toString() gives them, whose fraction has no trailing zero but at least one digit
+ * (".0", ".12", ".888"), then the time zone part as CCI gives it. "2000-12-31 22:59:59.000 Asia/Seoul KST"
+ * becomes "2000-12-31 22:59:59.0 Asia/Seoul KST", and "2015-01-01 00:10:00" "2015-01-01 00:10:00.0".
+ */
+void
+print_java_timestamp (FILE * fp, const char *value)
+{
+  const char *p = value;
+  const char *frac, *zone;
+  int len;
+
+  /* "yyyy-mm-dd hh:mm:ss" is 19 characters; anything else is printed as it is */
+  if (strlen (value) < 19 || value[4] != '-' || value[10] != ' ' || value[13] != ':')
+    {
+      fprintf (fp, "%s", value);
+      return;
+    }
+  p = value + 19;
+  fprintf (fp, "%.19s", value);
+  if (*p == '.')
+    {
+      frac = ++p;
+      while (*p >= '0' && *p <= '9')
+	{
+	  p++;
+	}
+      len = (int) (p - frac);
+      while (len > 1 && frac[len - 1] == '0')
+	{
+	  len--;
+	}
+      fprintf (fp, ".%.*s", len > 0 ? len : 1, len > 0 ? frac : "0");
+    }
+  else
+    {
+      fprintf (fp, ".0");
+    }
+  zone = p;
+  fprintf (fp, "%s", zone);
+}
+
 void
 formatdatetime (FILE * fp, char *buffer)
 {
@@ -1760,9 +1811,9 @@ _NEXT_MULTIPLE_LINE_SQL:
 		    {
 		      trimnumeric (fp, (char *) buffer);
 		    }
-		  else if (itemp == CCI_U_TYPE_DATETIME)
+		  else if (is_timestamp_type (itemp))
 		    {
-		      formatdatetime (fp, (char *) buffer);
+		      print_java_timestamp (fp, (char *) buffer);
 		    }
 		  else if (itemp == CCI_U_TYPE_NULL)
 		    {
@@ -1801,10 +1852,6 @@ _NEXT_MULTIPLE_LINE_SQL:
 		      fprintf (fp, "%s", (char *) buffer);
 		    }
 
-		  if (itemp == CCI_U_TYPE_TIMESTAMP)
-		    {
-		      fprintf (fp, ".0");
-		    }
 		  fprintf (fp, "     ");
 		}
 	    }
