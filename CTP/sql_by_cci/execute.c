@@ -465,6 +465,129 @@ get_bit_as_bool (int req, int col, int *value, int *ind)
   return res;
 }
 
+/* the charset codes of T_CCI_COL_INFO.charset that the JDBC driver maps in UJCIUtil.getJavaCharsetName() */
+#define CCI_CS_ASCII     0
+#define CCI_CS_BINARY    2
+#define CCI_CS_ISO8859_1 3
+#define CCI_CS_EUC_KR    4
+#define CCI_CS_UTF8      5
+
+static void
+put_replacement (FILE * fp)
+{
+  fputs ("\xEF\xBF\xBD", fp);	/* U+FFFD in UTF-8 */
+}
+
+/* the length of the valid UTF-8 prefix of the sequence at p (at most n bytes), and whether it is complete */
+static int
+utf8_prefix (const unsigned char *p, int n, int *complete)
+{
+  int need, i;
+  unsigned char lo = 0x80, hi = 0xBF;
+
+  *complete = 0;
+  if (p[0] < 0x80)
+    {
+      *complete = 1;
+      return 1;
+    }
+  if (p[0] >= 0xC2 && p[0] <= 0xDF)
+    need = 1;
+  else if (p[0] >= 0xE0 && p[0] <= 0xEF)
+    {
+      need = 2;
+      lo = p[0] == 0xE0 ? 0xA0 : 0x80;
+      hi = p[0] == 0xED ? 0x9F : 0xBF;
+    }
+  else if (p[0] >= 0xF0 && p[0] <= 0xF4)
+    {
+      need = 3;
+      lo = p[0] == 0xF0 ? 0x90 : 0x80;
+      hi = p[0] == 0xF4 ? 0x8F : 0xBF;
+    }
+  else
+    return 1;			/* not a lead byte: replaced alone */
+
+  for (i = 1; i <= need; i++)
+    {
+      if (i >= n)
+	return i;
+      if (i == 1 ? (p[i] < lo || p[i] > hi) : (p[i] < 0x80 || p[i] > 0xBF))
+	return i;
+    }
+  *complete = 1;
+  return need + 1;
+}
+
+/*
+ * A string the way cqt prints it: the JDBC driver gives a string of a BINARY charset column as
+ * CUBRIDBinaryString ("%02X " for every byte), and decodes any other into a Java String with the
+ * charset of the column, putting U+FFFD for every byte sequence that is not valid there; cqt then
+ * writes the String in UTF-8. The length is taken from CCI, so a string that holds a NUL is printed
+ * whole, as the JDBC driver gives it.
+ */
+void
+print_java_string (FILE * fp, const char *value, int len, int charset)
+{
+  const unsigned char *p = (const unsigned char *) value;
+  int i, n, complete;
+
+  if (charset == CCI_CS_BINARY)
+    {
+      for (i = 0; i < len; i++)
+	{
+	  fprintf (fp, "%02X ", p[i]);
+	}
+      return;
+    }
+
+  for (i = 0; i < len; i += n)
+    {
+      if (p[i] < 0x80)
+	{
+	  fputc (p[i], fp);
+	  n = 1;
+	}
+      else if (charset == CCI_CS_ISO8859_1)
+	{
+	  fputc (0xC0 | (p[i] >> 6), fp);
+	  fputc (0x80 | (p[i] & 0x3F), fp);
+	  n = 1;
+	}
+      else if (charset == CCI_CS_ASCII)
+	{
+	  put_replacement (fp);
+	  n = 1;
+	}
+      else if (charset == CCI_CS_EUC_KR)
+	{
+	  /* EUC-KR is passed on as CCI gives it: decoding it needs the KS X 1001 table */
+	  fputc (p[i], fp);
+	  n = 1;
+	}
+      else
+	{
+	  n = utf8_prefix (p + i, len - i, &complete);
+	  if (complete)
+	    {
+	      fwrite (p + i, 1, n, fp);
+	    }
+	  else
+	    {
+	      put_replacement (fp);
+	    }
+	}
+    }
+}
+
+/* CHAR, VARCHAR, NCHAR, NCHAR VARYING, ENUM and JSON: the types the JDBC driver reads as text */
+int
+is_string_type (int u_type)
+{
+  return u_type == CCI_U_TYPE_CHAR || u_type == CCI_U_TYPE_STRING || u_type == CCI_U_TYPE_NCHAR
+    || u_type == CCI_U_TYPE_VARNCHAR || u_type == CCI_U_TYPE_ENUM || u_type == CCI_U_TYPE_JSON;
+}
+
 /*
  * TIMESTAMP, DATETIME and their time zone kinds: JDBC gives them as java.sql.Timestamp. u_type is a
  * basic type: a column type from the result info has to go through CCI_GET_COLLECTION_DOMAIN() first,
@@ -1656,6 +1779,10 @@ _NEXT_MULTIPLE_LINE_SQL:
 		  else if (is_timestamp_type (CCI_GET_COLLECTION_DOMAIN (itemp)))
 		    {
 		      print_java_timestamp (fp, (char *) buffer);
+		    }
+		  else if (is_string_type (CCI_GET_COLLECTION_DOMAIN (itemp)) && !has_st)
+		    {
+		      print_java_string (fp, (char *) buffer, ind, CCI_GET_RESULT_INFO_CHARSET (res_col_info, index_count));
 		    }
 		  else if (itemp == CCI_U_TYPE_NULL)
 		    {
