@@ -465,7 +465,11 @@ get_bit_as_bool (int req, int col, int *value, int *ind)
   return res;
 }
 
-/* TIMESTAMP, DATETIME and their time zone kinds: JDBC gives them as java.sql.Timestamp. */
+/*
+ * TIMESTAMP, DATETIME and their time zone kinds: JDBC gives them as java.sql.Timestamp. u_type is a
+ * basic type: a column type from the result info has to go through CCI_GET_COLLECTION_DOMAIN() first,
+ * since a type above 31 (DATETIMELTZ) comes encoded there with bit 7.
+ */
 int
 is_timestamp_type (int u_type)
 {
@@ -1649,7 +1653,7 @@ _NEXT_MULTIPLE_LINE_SQL:
 		      /* every digit of the scale, as cqt prints it with BigDecimal.toPlainString() */
 		      fprintf (fp, "%s", (char *) buffer);
 		    }
-		  else if (is_timestamp_type (itemp))
+		  else if (is_timestamp_type (CCI_GET_COLLECTION_DOMAIN (itemp)))
 		    {
 		      print_java_timestamp (fp, (char *) buffer);
 		    }
