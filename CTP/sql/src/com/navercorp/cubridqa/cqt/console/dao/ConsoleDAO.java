@@ -1005,17 +1005,28 @@ public class ConsoleDAO extends Executor {
                             byte[] bytes = (byte[]) o;
                             sb.append(StringUtil.toHexString(bytes) + ",");
                         } else {
-                            sb.append(o + ",");
+                            sb.append(plain(o) + ",");
                         }
                     }
                 }
             } else {
-                sb.append(value.toString());
+                sb.append(plain(value));
             }
         } catch (Exception e) {
             e.printStackTrace();
         }
         return sb.toString();
+    }
+
+    /**
+     * APIS-1143: a NUMERIC prints with all its digits and no exponent (BigDecimal.toPlainString),
+     * as csql and CCI print it: 0.0000000000, not 0E-10. Every other value prints with toString.
+     */
+    private static String plain(Object value) {
+        if (value instanceof java.math.BigDecimal) {
+            return ((java.math.BigDecimal) value).toPlainString();
+        }
+        return String.valueOf(value);
     }
 
     public List<String> getConnList() {
