@@ -36,6 +36,7 @@ import com.navercorp.cubridqa.cqt.console.util.ConfigureUtil;
 import com.navercorp.cubridqa.cqt.console.util.CubridConnManager;
 import com.navercorp.cubridqa.cqt.console.util.CubridConnection;
 import com.navercorp.cubridqa.cqt.console.util.EnvGetter;
+import com.navercorp.cubridqa.cqt.console.util.JavaNumberFormat;
 import com.navercorp.cubridqa.cqt.console.util.MyDataSource;
 import com.navercorp.cubridqa.cqt.console.util.MyDriverManager;
 import com.navercorp.cubridqa.cqt.console.util.StringUtil;
@@ -522,7 +523,9 @@ public class ConsoleDAO extends Executor {
                             String s = ps.getString(index);
                             sb.append(s + System.getProperty("line.separator"));
                         } else {
-                            sb.append(o + System.getProperty("line.separator"));
+                            /* APIS-1143: a FLOAT or a DOUBLE as plain() prints it; the rest as before */
+                            Object text = (o instanceof Float || o instanceof Double) ? plain(o) : o;
+                            sb.append(text + System.getProperty("line.separator"));
                         }
                         param.setValue(o);
                     }
@@ -1020,11 +1023,20 @@ public class ConsoleDAO extends Executor {
 
     /**
      * APIS-1143: a NUMERIC prints with all its digits and no exponent (BigDecimal.toPlainString),
-     * as csql and CCI print it: 0.0000000000, not 0E-10. Every other value prints with toString.
+     * as csql and CCI print it: 0.0000000000, not 0E-10. A FLOAT or a DOUBLE prints as
+     * Float.toString/Double.toString give it since JDK 19 whatever the JDK (JavaNumberFormat), so
+     * that the answer does not depend on it: 2.1474836E9, not the 2.14748365E9 of JDK 8. Every
+     * other value prints with toString.
      */
     private static String plain(Object value) {
         if (value instanceof java.math.BigDecimal) {
             return ((java.math.BigDecimal) value).toPlainString();
+        }
+        if (value instanceof Float) {
+            return JavaNumberFormat.toString(((Float) value).floatValue());
+        }
+        if (value instanceof Double) {
+            return JavaNumberFormat.toString(((Double) value).doubleValue());
         }
         return String.valueOf(value);
     }

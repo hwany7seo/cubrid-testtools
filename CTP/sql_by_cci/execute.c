@@ -327,16 +327,112 @@ isdouble (char *buffer)
 }
 
 /*
- * The text Java gives a float or a double with Float.toString/Double.toString, which cqt prints:
- * the fewest digits that read back as the same value, written plain when 1e-3 <= |v| < 1e7
- * ("111.26", "0.001", "1234567.0") and as d.dddEn otherwise ("1.0E7", "1.5E-10").
+ * Whether the decimal digits[0].digits[1..n-1] x 10^exp10 reads back as v > 0 (as a float when is_float).
+ * strtod/strtof round correctly (half to even), so this tells whether the decimal is in R below.
+ */
+static int
+java_number_rounds_to (const char *digits, int n, int exp10, double v, int is_float)
+{
+  char buf[64];
+
+  snprintf (buf, sizeof (buf), "%c.%.*se%d", digits[0], n > 1 ? n - 1 : 1, n > 1 ? digits + 1 : "0", exp10);
+  return is_float ? (strtof (buf, NULL) == (float) v) : (strtod (buf, NULL) == v);
+}
+
+/*
+ * The decimal of n digits closest to v (|v|, all its exact digits in all[]) that reads back as v,
+ * into out[] (n digits) and *out_exp10. Only the two decimals of n digits around v can: all[]
+ * cut to n digits, and that plus one in the last digit. Returns 0 when neither does.
+ */
+static int
+java_number_pick (const char *all, int exp10, int n, double v, int is_float, char *out, int *out_exp10)
+{
+  char down[32], up[32];
+  int len = strlen (all), exact = 1, down_ok, up_ok = 0, up_exp10 = exp10, cmp, i;
+
+  for (i = 0; i < n; i++)
+    {
+      down[i] = i < len ? all[i] : '0';
+    }
+  down[n] = '\0';
+  for (i = n; i < len; i++)
+    {
+      if (all[i] != '0')
+	{
+	  exact = 0;
+	  break;
+	}
+    }
+
+  down_ok = java_number_rounds_to (down, n, exp10, v, is_float);
+  if (!exact)
+    {
+      memcpy (up, down, n + 1);
+      for (i = n - 1; i >= 0 && up[i] == '9'; i--)
+	{
+	  up[i] = '0';
+	}
+      if (i >= 0)
+	{
+	  up[i]++;
+	}
+      else
+	{
+	  /* 99..9 + 1 is 10^n: 1 followed by zeros, one place up */
+	  up[0] = '1';
+	  up_exp10 = exp10 + 1;
+	}
+      up_ok = java_number_rounds_to (up, n, up_exp10, v, is_float);
+    }
+
+  if (down_ok && up_ok)
+    {
+      /* the closer one; at the half, the one with the even last digit */
+      cmp = all[n] > '5' ? 1 : (all[n] < '5' ? -1 : 0);
+      for (i = n + 1; cmp == 0 && i < len; i++)
+	{
+	  if (all[i] != '0')
+	    {
+	      cmp = 1;
+	    }
+	}
+      if (cmp == 0)
+	{
+	  cmp = ((down[n - 1] - '0') % 2 == 0) ? -1 : 1;
+	}
+      down_ok = cmp < 0;
+      up_ok = !down_ok;
+    }
+  if (down_ok)
+    {
+      memcpy (out, down, n + 1);
+      *out_exp10 = exp10;
+      return 1;
+    }
+  if (up_ok)
+    {
+      memcpy (out, up, n + 1);
+      *out_exp10 = up_exp10;
+      return 1;
+    }
+  return 0;
+}
+
+/*
+ * The text Java gives a float or a double with Float.toString/Double.toString since JDK 19
+ * (JDK-4511638), which cqt prints with JavaNumberFormat whatever its JDK (APIS-1143). From the
+ * specification in the JDK 19 javadoc: of the decimals that round to v (R), take those of the
+ * least length m (of length 1 or 2 when m is 1), and of them the one closest to v (of two, the one
+ * with the even last digit). It is written plain when 1e-3 <= |v| < 1e7 ("111.26", "0.001",
+ * "1234567.0") and as d.dddEn otherwise ("1.0E7", "1.5E-10").
  */
 void
 java_number_str (char *out, size_t out_size, double v, int is_float)
 {
-  char buf[64], digits[32];
-  int p, max_p = is_float ? 9 : 17, exp10, nd, i, k;
-  const char *e;
+  /* the exact decimal expansion of a double has at most 767 significant digits */
+  char exact[1100], all[1100], digits[32];
+  int exp10, nd, i, k, n;
+  char *e;
 
   if (isnan (v))
     {
@@ -354,32 +450,40 @@ java_number_str (char *out, size_t out_size, double v, int is_float)
       return;
     }
 
-  for (p = 1; p <= max_p; p++)
+  /* exact[] is d.ddd...e[+-]xx with all the digits of |v| (glibc prints a double exactly) */
+  snprintf (exact, sizeof (exact), "%.800e", fabs (v));
+  e = strchr (exact, 'e');
+  exp10 = atoi (e + 1);
+  k = 0;
+  for (i = 0; exact + i < e; i++)
     {
-      snprintf (buf, sizeof (buf), "%.*e", p - 1, v);
-      if (is_float ? (strtof (buf, NULL) == (float) v) : (strtod (buf, NULL) == v))
+      if (exact[i] != '.')
+	{
+	  all[k++] = exact[i];
+	}
+    }
+  all[k] = '\0';
+
+  for (n = 1; n <= 17; n++)
+    {
+      if (java_number_pick (all, exp10, n, fabs (v), is_float, digits, &k))
 	{
 	  break;
 	}
     }
-
-  /* buf is [-]d[.ddd]e[+-]xx */
-  k = 0;
-  for (i = (buf[0] == '-') ? 1 : 0; buf[i] != 'e'; i++)
+  if (n == 1)
     {
-      if (buf[i] != '.')
-	{
-	  digits[k++] = buf[i];
-	}
+      /* m is 1: the closest of length 1 or 2, which is the closest of length 2 */
+      java_number_pick (all, exp10, 2, fabs (v), is_float, digits, &k);
     }
-  digits[k] = '\0';
+  exp10 = k;
+
+  k = strlen (digits);
   while (k > 1 && digits[k - 1] == '0')
     {
       digits[--k] = '\0';
     }
   nd = k;
-  e = strchr (buf, 'e');
-  exp10 = atoi (e + 1);
 
   i = 0;
   if (v < 0)
