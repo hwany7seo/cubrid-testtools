@@ -2896,21 +2896,12 @@ test (FILE * fp)
 	  fprintf (stdout, "The program doesn't compile cci_set_cas_change_mode interface.\n");
 #endif
 	}
-      else if (startswithCI (sqlstate[sql_count].sql, "COMMIT"))
-	{
-	  res = cci_end_tran (conn, CCI_TRAN_COMMIT, &error);
-	  if (res >= 0)
-	    {
-	      fprintf (fp, "===================================================\n");
-	      fprintf (fp, "0\n");
-	    }
-	  else
-	    {
-	      fprintf (stdout, "(%s, %d) %s ERROR : cci_connect(%s %d)\n\n",
-		       __FILE__, __LINE__, get_err_msg (conn), error.err_msg, error.err_code);
-	    }
-	}
-      else if (startswithCI (sqlstate[sql_count].sql, "ROLLBACK"))
+      /*
+       * COMMIT and ROLLBACK run as statements, as in cqt, so the CAS runs them as SQL: a trigger AFTER
+       * ROLLBACK fires (cci_end_tran() does not run it), and the server output follows as for any statement.
+       * ROLLBACK TO a savepoint keeps cci_savepoint().
+       */
+      else if (startswithCI (sqlstate[sql_count].sql, "ROLLBACK") && strcasestr (sqlstate[sql_count].sql, "to") != NULL)
 	{
 	  char *p = NULL;
 	  char *tmp = NULL;
@@ -2944,20 +2935,6 @@ test (FILE * fp)
 	      else
 		{
 		  fprintf (stdout, "rollback error: %s\n", error.err_msg);
-		}
-	    }
-	  else
-	    {
-	      res = cci_end_tran (conn, CCI_TRAN_ROLLBACK, &error);
-	      if (res >= 0)
-		{
-		  fprintf (fp, "===================================================\n");
-		  fprintf (fp, "0\n");
-		}
-	      else
-		{
-		  fprintf (stdout, "(%s, %d) %s ERROR : cci_connect(%s %d)\n\n",
-			   __FILE__, __LINE__, get_err_msg (conn), error.err_msg, error.err_code);
 		}
 	    }
 	}
