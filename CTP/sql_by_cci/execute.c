@@ -1208,6 +1208,38 @@ lenient (T_CCI_DATE * d, long y, long mo, long da, long h, long mi, long se, lon
   d->ms = ms;
 }
 
+/* SQLParser.isCall on the last line of the statement */
+static int
+cqt_is_call (const char *sql)
+{
+  char line[4096], nosp[4096];
+  const char *end = sql + strlen (sql), *b;
+  int i, j;
+  while (end > sql && (end[-1] == '\n' || end[-1] == '\r'))
+    end--;
+  for (b = end; b > sql && b[-1] != '\n'; b--)
+    ;
+  snprintf (line, sizeof (line), "%.*s", (int) (end - b), b);
+  for (i = j = 0; line[i]; i++)
+    if (line[i] != ' ')
+      nosp[j++] = line[i];
+  nosp[j] = '\0';
+  if (strstr (nosp, "call") == NULL)
+    return 0;
+  if (strncmp (nosp, "call", 4) == 0)
+    {
+      char *p1 = strchr (line, '('), *p2 = strchr (line, ')');
+      if (p1 && p2 && p1 < p2)
+	{
+	  for (; p1 < p2; p1++)
+	    if (*p1 == '?')
+	      return 1;
+	}
+      return 0;
+    }
+  return strncmp (nosp, "?=call", 6) == 0;
+}
+
 /*
  * Binds the values of a line "$type, $value, ..." to req. The line is split as cqt splits it, at a
  * comma that spaces and a '$' follow, so a value may hold a comma. A value "null" (any case) or the
@@ -2608,58 +2640,105 @@ print_plan (FILE * fp, int req, bool onlyjoingraph, bool hasfullplan)
     }
 }
 
+/*
+ * A value read by its own type, as cqt prints the object that getObject() gives: FLOAT and DOUBLE as
+ * Float.toString/Double.toString (JDK 19), the TIMESTAMP and DATETIME kinds as Timestamp.toString, a
+ * NULL as "null" and every other type as CCI gives it. For an OUT parameter of a CALL and for a column
+ * whose type the result info does not hold.
+ */
+static void
+print_value_by_type (FILE * fp, int req, int col)
+{
+  T_CCI_U_TYPE type = CCI_U_TYPE_NULL;
+  char *str = NULL;
+  char num[64];
+  float f;
+  double d;
+  int ind = -1;
+
+  if (cci_get_data (req, col, CCI_A_TYPE_STR, &str, &ind) < 0 || ind < 0)
+    {
+      fprintf (fp, "null");
+      return;
+    }
+  cci_get_data_type (req, col, &type);
+  if (type == CCI_U_TYPE_FLOAT && cci_get_data (req, col, CCI_A_TYPE_FLOAT, &f, &ind) >= 0)
+    {
+      java_number_str (num, sizeof (num), f, 1);
+      fprintf (fp, "%s", num);
+    }
+  else if ((type == CCI_U_TYPE_DOUBLE || type == CCI_U_TYPE_MONETARY)
+	   && cci_get_data (req, col, CCI_A_TYPE_DOUBLE, &d, &ind) >= 0)
+    {
+      java_number_str (num, sizeof (num), d, 0);
+      fprintf (fp, "%s", num);
+    }
+  else if (is_timestamp_type (CCI_GET_COLLECTION_DOMAIN (type)))
+    {
+      print_java_timestamp (fp, str);
+    }
+  else
+    {
+      fprintf (fp, "%s", str);
+    }
+}
+
+static void
+print_error (FILE * fp, T_CCI_ERROR * error)
+{
+  fprintf (stdout, "Error:%d\n", error->err_code);
+  fprintf (fp, "Error:%d\n", error->err_code);
+  if (is_server_message_on)
+    {
+      char *end = strstr (error->err_msg, "[CAS INFO");
+      if (end)
+	{
+	  *end = '\0';
+	}
+      fprintf (fp, "%s\n", error->err_msg);
+    }
+}
+
+/*
+ * A statement with a line of parameter values, as cqt runs it (ConsoleDAO):
+ *  - a CALL (SQLParser.isCall on its last line) runs through prepareCall(): the IN values are bound,
+ *    the OUT parameters registered, and cqt prints the update count, then every OUT value on a line;
+ *  - any other statement runs through prepareStatement(), with setQueryInfo(true) when its plan is
+ *    asked for: the CAS compiles it again at execution with its host variables and keeps that plan.
+ */
 int
 executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
 {
-  static int seq = 0;
-  int ind;
   int req = 0;
   int res = 0;
   int ret = 0;
-  int execute_result = 0;
   int bound;
   int outs[256];
   int n_outs = 0;
   int i;
   T_CCI_ERROR error;
-  int col_count = 0, t = 0;
-  char *buffer;
+  int col_count = 0;
   T_CCI_COL_INFO *res_col_info;
   T_CCI_SQLX_CMD cmd_type;
   char *server_output_buffer = NULL;
   char *sql = pSqlState->sql;
   bool hasqueryplan = pSqlState->hasqp;
-
-  current_sql = sql;
   bool onlyjoingraph = pSqlState->onlyjg;
   bool hasfullplan = pSqlState->hasfullp;
-  bool iscall = pSqlState->iscallwithoutvalue;
+  bool iscall = cqt_is_call (sql);
   bool wantplan = hasqueryplan || (queryplan && starts_with_select (sql));
   bool executed = false;
 
+  current_sql = sql;
   fprintf (fp, "===================================================\n");
 
-  if (iscall)
-    {
-      req = cci_prepare (conn, sql, CCI_PREPARE_CALL, &error);
-    }
-  else
-    {
-      req = cci_prepare (conn, sql, 0, &error);
-    }
-
+  req = cci_prepare (conn, sql, iscall ? CCI_PREPARE_CALL : 0, &error);
   if (req < 0)
     {
-      fprintf (stdout, "Error:%d\n", error.err_code);
-      fprintf (fp, "Error:%d\n", error.err_code);
+      print_error (fp, &error);
       if (is_server_message_on)
 	{
-	  char *end = strstr (error.err_msg, "[CAS INFO");
-	  if (end)
-	    {
-	      *end = '\0';
-	    }
-	  fprintf (fp, "%s\n\n", error.err_msg);
+	  fprintf (fp, "\n");
 	}
       ret = -1;
       goto _END;
@@ -2688,79 +2767,33 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
   executed = true;
   if (res < 0)
     {
-      fprintf (stdout, "Error:%d\n", error.err_code);
       map_not_bind_error (&error);
-      fprintf (fp, "Error:%d\n", error.err_code);
-      if (is_server_message_on)
-	{
-	  char *end = strstr (error.err_msg, "[CAS INFO");
-	  if (end)
-	    {
-	      *end = '\0';
-	    }
-	  fprintf (fp, "%s\n", error.err_msg);
-	}
+      print_error (fp, &error);
       ret = -1;
       goto _END;
     }
 
   if (iscall)
     {
-      //print call statement column name
-      for (t = 1; t <= n_outs; t++)
+      fprintf (fp, "%d\n", res);
+      if (n_outs > 0)
 	{
-	  if (t == 1)
+	  if (cci_cursor (req, 1, CCI_CURSOR_CURRENT, &error) < 0 || cci_fetch (req, &error) < 0)
 	    {
-	      fprintf (fp, "%d", n_outs);
+	      fprintf (fp, "Error:%d\n", error.err_code);
+	      ret = -1;
+	      goto _END;
 	    }
-	  else
+	  for (i = 0; i < n_outs; i++)
 	    {
-	      fprintf (fp, " %d", n_outs);
+	      print_value_by_type (fp, req, outs[i]);
+	      fprintf (fp, "\n");
 	    }
 	}
-      fprintf (fp, "\n");
-
-      //print data
-      res = cci_cursor (req, 1, CCI_CURSOR_CURRENT, &error);
-      if (res == CCI_ER_NO_MORE_DATA)
-	{
-	  fprintf (fp, "Error:%d\n", error.err_code);
-	  ret = -1;
-	  goto _END;
-	}
-
-      if ((res = cci_fetch (req, &error) < 0))
-	{
-	  fprintf (fp, "Error:%d\n", error.err_code);
-	  ret = -1;
-	  goto _END;
-	}
-
-      if ((res = cci_get_data (req, 1, CCI_A_TYPE_STR, &buffer, &ind)) < 0)
-	{
-	  fprintf (fp, "Error:%d\n", error.err_code);
-	  ret = -1;
-	  goto _END;
-	}
-      // ind: string length, buffer: a string which came from the out binding parameter of test_out(?) Java SP.
-      if (ind == -1)
-	{
-	  fprintf (fp, "null\n");
-	}
-      else
-	{
-	  fprintf (fp, "%s\n", buffer);
-	}
-      ret = -1;
       goto _END;
     }
 
   res_col_info = cci_get_result_info (req, &cmd_type, &col_count);
-  /*
-   * A CALL with parameter values runs in cqt through PreparedStatement.execute(), which gives no
-   * result set but an update count, so cqt prints the count (1) and not the return value. A CALL
-   * without parameters runs through Statement and prints its result set, as in execute().
-   */
   if (cmd_type == CUBRID_STMT_SELECT)
     {
       dumptable (fp, req, conn, hasqueryplan, onlyjoingraph, hasfullplan);
@@ -2980,10 +3013,12 @@ test (FILE * fp)
 	    }
 
 	  /*
-	   * As cqt chooses (Sql.isPrep): a statement with a '?' outside quotes and a line of values runs
-	   * through prepareStatement(); any other statement as it is, its line of values left unused.
+	   * As cqt chooses (Sql): a CALL by its last line, with or without a line of values, through
+	   * prepareCall(); a statement with a '?' and a line of values through prepareStatement(); any
+	   * other statement as it is, its line of values left unused.
 	   */
-	  if (parameter[sql_count] != NULL && is_prep (sqlstate[sql_count].sql))
+	  if (cqt_is_call (sqlstate[sql_count].sql)
+	      || (parameter[sql_count] != NULL && is_prep (sqlstate[sql_count].sql)))
 	    {
 	      executebind (fp, conn, parameter[sql_count], &sqlstate[sql_count]); 
 	    }
