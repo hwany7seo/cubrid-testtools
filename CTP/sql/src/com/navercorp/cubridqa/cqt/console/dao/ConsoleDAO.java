@@ -980,7 +980,12 @@ public class ConsoleDAO extends Executor {
                         String tableName = (String) method2.invoke(oid, objects);
                         sb.append(tableName);
                     } catch (Exception e) {
-                        sb.append(value.toString());
+                        /*
+                         * APIS-1143: not an OID. A value of a column with no type of its own (the
+                         * value of a CALL, an expression of host variables) prints as a value of its
+                         * type does: plain(), so a FLOAT or a DOUBLE as JDK 19 prints it.
+                         */
+                        sb.append(plain(value));
                     }
                 } else {
                     Method method = rs.getClass().getMethod("getCollection", intType);
