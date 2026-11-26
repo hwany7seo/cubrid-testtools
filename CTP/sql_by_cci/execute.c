@@ -776,6 +776,13 @@ print_set_element (FILE * fp, T_CCI_SET set, int index, const char *value)
     {
       print_java_timestamp (fp, value);
     }
+  else if (u_type == CCI_U_TYPE_BIT || u_type == CCI_U_TYPE_VARBIT)
+    {
+      /* cqt prints the byte[] of a BIT element with StringUtil.toHexString: lower case */
+      const char *q;
+      for (q = value; *q; q++)
+	fputc ((*q >= 'A' && *q <= 'F') ? *q + 32 : *q, fp);
+    }
   else
     {
       fprintf (fp, "%s", value);
