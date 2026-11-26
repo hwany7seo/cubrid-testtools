@@ -661,7 +661,7 @@ utf8_prefix (const unsigned char *p, int n, int *complete)
     {
       need = 2;
       lo = p[0] == 0xE0 ? 0xA0 : 0x80;
-      hi = p[0] == 0xED ? 0x9F : 0xBF;
+      hi = 0xBF;		/* ED A0..BF is a surrogate: JDK 8 takes the sequence as one malformed one */
     }
   else if (p[0] >= 0xF0 && p[0] <= 0xF4)
     {
@@ -679,7 +679,7 @@ utf8_prefix (const unsigned char *p, int n, int *complete)
       if (i == 1 ? (p[i] < lo || p[i] > hi) : (p[i] < 0x80 || p[i] > 0xBF))
 	return i;
     }
-  *complete = 1;
+  *complete = !(p[0] == 0xED && p[1] >= 0xA0);
   return need + 1;
 }
 
@@ -1395,6 +1395,42 @@ open_script (const char *file_name)
 	}
     }
   text[size] = '\0';
+  /*
+   * The text as cqt reads it, through a UTF-8 reader: every byte sequence that is not UTF-8 becomes
+   * U+FFFD (EF BF BD), by the rules of JDK 8, before it goes to the server.
+   */
+  {
+    long j = 0, k;
+    int n, complete;
+    char *u = (char *) malloc (size * 3 + 1);
+    if (u != NULL)
+      {
+	for (k = 0; k < size; k += n)
+	  {
+	    if ((unsigned char) text[k] < 0x80)
+	      {
+		u[j++] = text[k];
+		n = 1;
+		continue;
+	      }
+	    n = utf8_prefix ((const unsigned char *) text + k, (int) (size - k), &complete);
+	    if (complete)
+	      {
+		memcpy (u + j, text + k, n);
+		j += n;
+	      }
+	    else
+	      {
+		memcpy (u + j, "\xEF\xBF\xBD", 3);
+		j += 3;
+	      }
+	  }
+	u[j] = '\0';
+	free (text);
+	text = u;
+	size = j;
+      }
+  }
   /* the buffer lives as long as the process; the script is read once */
   return size > 0 ? fmemopen (text, size, "r") : fmemopen (text, 1, "r");
 }
