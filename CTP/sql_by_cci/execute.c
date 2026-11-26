@@ -1742,7 +1742,7 @@ dumptable (FILE * fp, int req, char con, bool hasqueryplan, bool onlyjoingraph, 
   T_CCI_COL_INFO *res_col_info;
   T_CCI_SQLX_CMD cmd_type;
   char *plan = NULL;
-  char class_str[24] = { 0x00 };
+  char class_str[1024] = { 0x00 };	/* a class name of 24 bytes and more was cut at 24 */
 
 _NEXT_MULTIPLE_LINE_SQL:
   //getting column information when the prepared statement is the SELECT query
@@ -1966,7 +1966,10 @@ _NEXT_MULTIPLE_LINE_SQL:
 			  //fprintf(stdout, "(%s, %d) ERROR : %s [%d] \n\n", __FILE__, __LINE__,error.err_msg, error.err_code );
 			  fprintf (fp, "null");
 			}
-		      fprintf (fp, "%s", class_str);
+		      else
+			{
+			  fprintf (fp, "%s", class_str);
+			}
 		    }
 		  else
 		    {
