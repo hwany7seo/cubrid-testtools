@@ -1956,6 +1956,17 @@ _NEXT_MULTIPLE_LINE_SQL:
       for (index_count = 1; index_count <= col_count; index_count++)
 	{
 	  itemp = CCI_GET_RESULT_INFO_TYPE (res_col_info, index_count);
+	  if (itemp == CCI_U_TYPE_NULL)
+	    {
+	      /* the type that comes with the value: a CALL, an expression of host variables (cci_get_data_type) */
+	      T_CCI_U_TYPE vt;
+	      if (cci_get_data_type (req, index_count, &vt) >= 0
+		  && (vt == CCI_U_TYPE_FLOAT || vt == CCI_U_TYPE_DOUBLE || vt == CCI_U_TYPE_MONETARY
+		      || is_timestamp_type (CCI_GET_COLLECTION_DOMAIN (vt))))
+		{
+		  itemp = vt;
+		}
+	    }
 	  if (CCI_IS_SET_TYPE (itemp) || CCI_IS_MULTISET_TYPE (itemp) || CCI_IS_SEQUENCE_TYPE (itemp)
 	      || CCI_IS_COLLECTION_TYPE (itemp))
 	    {
