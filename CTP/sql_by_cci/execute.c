@@ -2896,12 +2896,21 @@ cmp_result_files (char *a, char *b)
     }
   else
     {
-      ch1 = getc (fp1);
-      ch2 = getc (fp2);
+      /* as cqt compares them (ConsoleBO): without any CR or LF, so that only the text decides */
+      do
+	ch1 = getc (fp1);
+      while (ch1 == '\r' || ch1 == '\n');
+      do
+	ch2 = getc (fp2);
+      while (ch2 == '\r' || ch2 == '\n');
       while ((ch1 != EOF) && (ch2 != EOF) && (ch1 == ch2))
 	{
-	  ch1 = getc (fp1);
-	  ch2 = getc (fp2);
+	  do
+	    ch1 = getc (fp1);
+	  while (ch1 == '\r' || ch1 == '\n');
+	  do
+	    ch2 = getc (fp2);
+	  while (ch2 == '\r' || ch2 == '\n');
 	}
 
       if (ch1 == ch2)
