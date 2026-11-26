@@ -120,6 +120,32 @@ map_not_bind_error (T_CCI_ERROR * error)
 /* the statement being run, for the checks that depend on its text */
 static const char *current_sql = NULL;
 
+/*
+ * ConsoleBO.isPropOn/isPropOff: "<prop>\s+on" or "<prop>\s+off" found anywhere in the statement, in
+ * any case. cqt takes such a statement as the command and does not run it, even when the words are in
+ * a comment of the statement.
+ */
+static int
+has_prop (const char *sql, const char *prop, const char *val)
+{
+  size_t pl = strlen (prop), vl = strlen (val);
+  const char *p;
+  for (p = sql; *p; p++)
+    {
+      const char *q;
+      if (strncasecmp (p, prop, pl) != 0)
+	continue;
+      q = p + pl;
+      if (!isspace ((unsigned char) *q))
+	continue;
+      while (isspace ((unsigned char) *q))
+	q++;
+      if (strncasecmp (q, val, vl) == 0)
+	return 1;
+    }
+  return 0;
+}
+
 /* Sql.isPrep of cqt: a '?' outside quotes */
 static int
 is_prep (const char *sql)
@@ -2803,7 +2829,13 @@ test (FILE * fp)
 	{
 	  continue;
 	}
-      if (startswithCI (sqlstate[sql_count].sql, "AUTOCOMMIT OFF"))
+      const char *cs = sqlstate[sql_count].sql;
+      int ac_on = has_prop (cs, "autocommit", "on"), ac_off = !ac_on && has_prop (cs, "autocommit", "off");
+      int hc_on = !ac_on && !ac_off && has_prop (cs, "holdcas", "on");
+      int hc_off = !ac_on && !ac_off && !hc_on && has_prop (cs, "holdcas", "off");
+      int sm_on = !ac_on && !ac_off && !hc_on && !hc_off && has_prop (cs, "server-message", "on");
+      int sm_off = !ac_on && !ac_off && !hc_on && !hc_off && !sm_on && has_prop (cs, "server-message", "off");
+      if (ac_off)
 	{
 	  res = cci_set_autocommit (conn, CCI_AUTOCOMMIT_FALSE);
 	  if (res < 0)
@@ -2812,7 +2844,7 @@ test (FILE * fp)
 		       __FILE__, __LINE__, get_err_msg (conn), error.err_msg, error.err_code);
 	    }
 	}
-      else if (startswithCI (sqlstate[sql_count].sql, "AUTOCOMMIT ON"))
+      else if (ac_on)
 	{
 	  res = cci_set_autocommit (conn, CCI_AUTOCOMMIT_TRUE);
 	  if (res < 0)
@@ -2821,18 +2853,15 @@ test (FILE * fp)
 		       __FILE__, __LINE__, get_err_msg (conn), error.err_msg, error.err_code);
 	    }
 	}
-      else if (startswithCI (sqlstate[sql_count].sql, "--+ SERVER-MESSAGE ON")
-	       || startswithCI (sqlstate[sql_count].sql, "--+SERVER-MESSAGE ON"))
+      else if (sm_on)
 	{
 	  set_server_message (fp, conn, 1);
 	}
-      else if (startswithCI (sqlstate[sql_count].sql, "--+ SERVER-MESSAGE OFF")
-	       || startswithCI (sqlstate[sql_count].sql, "--+SERVER-MESSAGE OFF"))
+      else if (sm_off)
 	{
 	  set_server_message (fp, conn, 0);
 	}
-      else if (startswithCI (sqlstate[sql_count].sql, "--+ HOLDCAS ON")
-	       || startswithCI (sqlstate[sql_count].sql, "--+HOLDCAS ON"))
+      else if (hc_on)
 	{
 #ifdef CCI_SET_CAS_CHANGE_MODE_INTERFACE
 	  //printf("%s\n",sqlstate[j].sql);
@@ -2846,8 +2875,7 @@ test (FILE * fp)
 	  fprintf (stdout, "The program doesn't compile cci_set_cas_change_mode interface.\n");
 #endif
 	}
-      else if (startswithCI (sqlstate[sql_count].sql, "--+ HOLDCAS OFF")
-	       || startswithCI (sqlstate[sql_count].sql, "--+HOLDCAS OFF"))
+      else if (hc_off)
 	{
 #ifdef CCI_SET_CAS_CHANGE_MODE_INTERFACE
 	  res = cci_set_cas_change_mode (conn, CCI_CAS_CHANGE_MODE_AUTO, &error);
