@@ -1935,14 +1935,7 @@ _NEXT_MULTIPLE_LINE_SQL:
   if (res == CCI_ER_NO_MORE_DATA)
     {
       fprintf (fp, "\n");
-      if ((queryplan && starts_with_select (current_sql)) || hasqueryplan)
-	{
-	  goto _PRINT_QUERY_PLAN;
-	}
-      else
-	{
-	  goto _DUMPTABLE_WHILE_END;
-	}
+      goto _FOR_DML_STATEMENT_END;
     }
 
   if (res < 0)
@@ -2145,37 +2138,20 @@ _NEXT_MULTIPLE_LINE_SQL:
       if (res == CCI_ER_NO_MORE_DATA)
 	{
 	  fprintf (fp, "\n");
-	  if ((queryplan && starts_with_select (current_sql)) || hasqueryplan)
-	    {
-	      res = cci_get_query_plan (req, &plan);
-	      {
-		if (res < 0)
-		  {
-		    fprintf (stdout, "%s(%d) - %s ERROR : (%s %d) \n\n", __FILE__, __LINE__, __FUNCTION__,
-			     get_err_msg (res), res);
-		  }
-		if (res >= 0)
-		  {
-             if (onlyjoingraph)
-               {
-                 formatjoingraph (fp, plan);
-               }
-             else if (hasfullplan)
-               {
-                 formatfullplan (fp, plan);
-               }
-             else
-               {
-                 formatplan (fp, plan);
-               }
-      }
-	      }
-	    }
 
 	_FOR_DML_STATEMENT_END:
 	  res = cci_next_result (req, &error);
 	  if (res == CAS_ER_NO_MORE_RESULT_SET)
 	    {
+	      /*
+	       * cqt asks for the plan once, after every result of the statement (ConsoleDAO: getAllResult(),
+	       * then getQueryplan()). A line without ';' at its end joins the next statement to it, so one
+	       * statement of the script can give more than one result.
+	       */
+	      if ((queryplan && starts_with_select (current_sql)) || hasqueryplan)
+		{
+		  goto _PRINT_QUERY_PLAN;
+		}
 	      goto _DUMPTABLE_WHILE_END;
 	    }
 	  goto _NEXT_MULTIPLE_LINE_SQL;
@@ -2522,7 +2498,7 @@ execute (FILE * fp, char conn, const SqlStateStruce *pSqlState)
       dumptable (fp, req, conn, hasqueryplan, onlyjoingraph, hasfullplan);
       goto _END;
     }
-  else if (cmd_type == CUBRID_STMT_UPDATE || cmd_type == CUBRID_STMT_DELETE)
+  else if (hasqueryplan)	/* cqt asks for the plan of any statement with --@queryplan, not only UPDATE and DELETE */
     {
       fprintf (fp, "%d\n", res);
       if (hasqueryplan)
@@ -2595,6 +2571,32 @@ _END:
   return ret;
 }
 
+/* the query plan of req, in the form the script asks for */
+static void
+print_plan (FILE * fp, int req, bool onlyjoingraph, bool hasfullplan)
+{
+  char *plan = NULL;
+  int res = cci_get_query_plan (req, &plan);
+
+  if (res < 0)
+    {
+      fprintf (stdout, "%s(%d) - %s ERROR : (%s %d) \n\n", __FILE__, __LINE__, __FUNCTION__, get_err_msg (res), res);
+      return;
+    }
+  if (onlyjoingraph)
+    {
+      formatjoingraph (fp, plan);
+    }
+  else if (hasfullplan)
+    {
+      formatfullplan (fp, plan);
+    }
+  else
+    {
+      formatplan (fp, plan);
+    }
+}
+
 int
 executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
 {
@@ -2621,6 +2623,7 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
   bool onlyjoingraph = pSqlState->onlyjg;
   bool hasfullplan = pSqlState->hasfullp;
   bool iscall = pSqlState->iscallwithoutvalue;
+  bool wantplan = hasqueryplan || (queryplan && starts_with_select (sql));
   bool executed = false;
 
   fprintf (fp, "===================================================\n");
@@ -2670,7 +2673,7 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
     }
 
   /* a value CCI did not take leaves its parameter unbound: cci_execute() then refuses, as JDBC does */
-  res = cci_execute (req, CCI_EXEC_QUERY_ALL, 0, &error);
+  res = cci_execute (req, (!iscall && wantplan) ? CCI_EXEC_QUERY_INFO : CCI_EXEC_QUERY_ALL, 0, &error);
   executed = true;
   if (res < 0)
     {
@@ -2775,6 +2778,11 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
 	    {
 	      fprintf (fp, "%d\n", res);
 	    }
+	}
+      /* the plan once, after every result (cqt: getAllResult(), then getQueryplan()) */
+      if (hasqueryplan)
+	{
+	  print_plan (fp, req, onlyjoingraph, hasfullplan);
 	}
     }
 
