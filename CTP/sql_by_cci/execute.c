@@ -2844,6 +2844,116 @@ _END:
   return ret;
 }
 
+/*
+ * The system parameters back to their defaults before a script, as cqt resets them before every file
+ * (ConsoleBO.resetConnection with the <reset> items of the test config, PropertiesUtil): every <item>
+ * of <reset>, trimmed, followed by ";" and a line end, then ";", run as one statement. The file is
+ * CCQT_TEST_CONFIG_FILE, which run.sh sets from jdbc_config_file, or test_default.xml of CTP_HOME.
+ * Without it nothing is reset. A parameter left by one script (tz_leap_second_support, timezone ...)
+ * then no longer changes the results of the next one.
+ */
+static void
+reset_system_parameters (int conn)
+{
+  char path[1024];
+  const char *env = getenv ("CCQT_TEST_CONFIG_FILE");
+  const char *home = getenv ("CTP_HOME");
+  FILE *f;
+  long size;
+  char *xml, *p, *end, *sql;
+  size_t sql_len = 0;
+  int req;
+  T_CCI_ERROR error;
+
+  if (env != NULL && env[0] != '\0')
+    {
+      snprintf (path, sizeof (path), "%s", env);
+    }
+  else if (home != NULL && home[0] != '\0')
+    {
+      snprintf (path, sizeof (path), "%s/sql/configuration/test_config/test_default.xml", home);
+    }
+  else
+    {
+      return;
+    }
+  f = fopen (path, "rb");
+  if (f == NULL)
+    {
+      return;
+    }
+  fseek (f, 0, SEEK_END);
+  size = ftell (f);
+  fseek (f, 0, SEEK_SET);
+  xml = (char *) malloc (size + 1);
+  sql = (char *) malloc (size + 2);
+  if (xml == NULL || sql == NULL || (long) fread (xml, 1, size, f) != size)
+    {
+      free (xml);
+      free (sql);
+      fclose (f);
+      return;
+    }
+  fclose (f);
+  xml[size] = '\0';
+
+  /* the comments out */
+  for (p = strstr (xml, "<!--"); p != NULL; p = strstr (p, "<!--"))
+    {
+      end = strstr (p, "-->");
+      if (end == NULL)
+	{
+	  *p = '\0';
+	  break;
+	}
+      memset (p, ' ', end + 3 - p);
+    }
+
+  p = strstr (xml, "<reset>");
+  end = p ? strstr (p, "</reset>") : NULL;
+  if (p != NULL && end != NULL)
+    {
+      *end = '\0';
+      while ((p = strstr (p, "<item>")) != NULL)
+	{
+	  char *s = p + strlen ("<item>"), *e = strstr (s, "</item>");
+	  if (e == NULL)
+	    {
+	      break;
+	    }
+	  while (s < e && isspace ((unsigned char) *s))
+	    s++;
+	  while (e > s && isspace ((unsigned char) e[-1]))
+	    e--;
+	  memcpy (sql + sql_len, s, e - s);
+	  sql_len += e - s;
+	  sql[sql_len++] = ';';
+	  sql[sql_len++] = '\n';
+	  p = e;
+	}
+    }
+  if (sql_len > 0)
+    {
+      sql[sql_len++] = ';';
+      sql[sql_len] = '\0';
+      req = cci_prepare (conn, sql, 0, &error);
+      if (req >= 0)
+	{
+	  if (cci_execute (req, CCI_EXEC_QUERY_ALL, 0, &error) < 0)
+	    {
+	      fprintf (stdout, "reset of the system parameters: Error:%d\n", error.err_code);
+	    }
+	  cci_close_req_handle (req);
+	}
+      else
+	{
+	  fprintf (stdout, "reset of the system parameters: Error:%d\n", error.err_code);
+	}
+    }
+  free (xml);
+  free (sql);
+}
+
 int
 test (FILE * fp)
 {
@@ -2874,6 +2984,8 @@ test (FILE * fp)
 
       count++;
     }
+
+  reset_system_parameters (conn);
 
   for (sql_count = 0; sql_count < total_sql; sql_count++)
     {

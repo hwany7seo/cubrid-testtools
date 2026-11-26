@@ -792,6 +792,8 @@ function do_test()
 	  port=`ini -s "%BROKER1"  $CUBRID/conf/cubrid_broker.conf BROKER_PORT`
 	  resultFolder="schedule_cdriver_${os_type}_${scenario_alias}_`date +"%Y%m%d%H%M%S"`_${cubrid_ver}_${cubrid_bits}"
 	  ccqt_start_ms=$(date +%s%3N)
+	  # the <reset> items that cqt runs before every file, so that sql_by_cci resets the same system parameters
+	  export CCQT_TEST_CONFIG_FILE=${CTP_HOME}/sql/configuration/test_config/${jdbc_config_file_ext:-test_default.xml}
 	  $CTP_HOME/sql_by_cci/ccqt $port $db_name ${scenario_alias} ${resultFolder} ${scenario_repo_root} $CTP_HOME ${cci_urlproperty} 2>&1 | tee -a $log_filename 
 	  ccqt_end_ms=$(date +%s%3N)
 	  "$JAVA_HOME/bin/java" -classpath "${CLASSPATH}${separator}${CPCLASSES}" com.navercorp.cubridqa.cqt.console.util.CciJunitXml "$CTP_HOME/result/sql_by_cci/${resultFolder}" "${scenario_repo_root}" ${scenario_category} ${cubrid_bits}bit "${cubrid_ver}" "${log_filename%.log}" $ccqt_start_ms $ccqt_end_ms 2>&1 | tee -a $log_filename
