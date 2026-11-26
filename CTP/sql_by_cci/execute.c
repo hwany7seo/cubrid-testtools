@@ -117,6 +117,21 @@ map_not_bind_error (T_CCI_ERROR * error)
 /* the statement being run, for the checks that depend on its text */
 static const char *current_sql = NULL;
 
+/* Sql.isPrep of cqt: a '?' outside quotes */
+static int
+is_prep (const char *sql)
+{
+  int lock = 1;
+  for (; *sql; sql++)
+    {
+      if (*sql == '\'')
+	lock = !lock;
+      if (*sql == '?' && lock)
+	return 1;
+    }
+  return 0;
+}
+
 /*
  * cqt asks for the plan of a statement in a .queryPlan case only when its text starts with SELECT
  * (ConsoleDAO: script.trim().toUpperCase().startsWith("SELECT")), so EXECUTE, SHOW, WITH and a
@@ -2826,7 +2841,11 @@ test (FILE * fp)
 	      has_st = 0;
 	    }
 
-	  if (parameter[sql_count] != NULL)
+	  /*
+	   * As cqt chooses (Sql.isPrep): a statement with a '?' outside quotes and a line of values runs
+	   * through prepareStatement(); any other statement as it is, its line of values left unused.
+	   */
+	  if (parameter[sql_count] != NULL && is_prep (sqlstate[sql_count].sql))
 	    {
 	      executebind (fp, conn, parameter[sql_count], &sqlstate[sql_count]); 
 	    }
