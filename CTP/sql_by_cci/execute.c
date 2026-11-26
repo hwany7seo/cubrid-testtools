@@ -26,6 +26,8 @@
 
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <ctype.h>
+#include <strings.h>
 #include <string.h>
 #include <stdbool.h>
 #include <strings.h>
@@ -171,30 +173,6 @@ len (char a[])
     }
 
   return temp;
-}
-
-int
-get_out_num_by_str (const char *str)
-{
-  int count = 0;
-  char *ch = NULL;
-  ch = strstr (str, "$out:");
-
-  while (ch != NULL)
-    {
-      ch = strstr (ch, "$out:");
-      if (ch != '\0')
-	{
-	  count++;
-	}
-      else
-	{
-	  break;
-	}
-      ch = ch + strlen ("$out:");
-    }
-
-  return count;
 }
 
 int
@@ -951,167 +929,6 @@ replace_substring(char *source, const char *pattern, const char *replacement)
 }
 
 
-T_CCI_U_TYPE
-getutype (char *p)
-{
-  if (startswithCI (trimline (p) + 1, "INT"))
-    {
-      return CCI_U_TYPE_INT;
-    }
-  if (startswithCI (trimline (p) + 1, "CHAR"))
-    {
-      return CCI_U_TYPE_CHAR;
-    }
-  if (startswithCI (trimline (p) + 1, "STRING"))
-    {
-      return CCI_U_TYPE_STRING;
-    }
-  if (startswithCI (trimline (p) + 1, "VARCHAR"))
-    {
-      return CCI_U_TYPE_STRING;
-    }
-  if (startswithCI (trimline (p) + 1, "BIT"))
-    {
-      return CCI_U_TYPE_BIT;
-    }
-  if (startswithCI (trimline (p) + 1, "VARBIT"))
-    {
-      return CCI_U_TYPE_VARBIT;
-    }
-  /* cqt binds a NUMERIC value as a Double (CubridUtil.getObject) */
-  if (startswithCI (trimline (p) + 1, "NUMERIC"))
-    {
-      return CCI_U_TYPE_DOUBLE;
-    }
-  if (startswithCI (trimline (p) + 1, "INT"))
-    {
-      return CCI_U_TYPE_INT;
-    }
-  if (startswithCI (trimline (p) + 1, "SHORT"))
-    {
-      return CCI_U_TYPE_SHORT;
-    }
-  /* cqt binds MONETARY, BIGINT and DATETIME values as text (Types.VARCHAR or setObject of a String) */
-  if (startswithCI (trimline (p) + 1, "MONETARY"))
-    {
-      return CCI_U_TYPE_STRING;
-    }
-  if (startswithCI (trimline (p) + 1, "FLOAT"))
-    {
-      return CCI_U_TYPE_FLOAT;
-    }
-  if (startswithCI (trimline (p) + 1, "DOUBLE"))
-    {
-      return CCI_U_TYPE_DOUBLE;
-    }
-  /* the longer names first: DATE would take DATETIME, and TIME TIMESTAMP */
-  if (startswithCI (trimline (p) + 1, "DATETIME"))
-    {
-      return CCI_U_TYPE_STRING;
-    }
-  if (startswithCI (trimline (p) + 1, "DATE"))
-    {
-      return CCI_U_TYPE_DATE;
-    }
-  if (startswithCI (trimline (p) + 1, "TIMESTAMP"))
-    {
-      return CCI_U_TYPE_TIMESTAMP;
-    }
-  if (startswithCI (trimline (p) + 1, "TIME"))
-    {
-      return CCI_U_TYPE_TIME;
-    }
-  if (startswithCI (trimline (p) + 1, "SET"))
-    {
-      return CCI_U_TYPE_SET;
-    }
-  if (startswithCI (trimline (p) + 1, "MULTISET"))
-    {
-      return CCI_U_TYPE_MULTISET;
-    }
-  if (startswithCI (trimline (p) + 1, "SEQUENCE"))
-    {
-      return CCI_U_TYPE_SEQUENCE;
-    }
-  if (startswithCI (trimline (p) + 1, "OBJECT"))
-    {
-      return CCI_U_TYPE_OBJECT;
-    }
-  if (startswithCI (trimline (p) + 1, "RESULTSET"))
-    {
-      return CCI_U_TYPE_RESULTSET;
-    }
-  if (startswithCI (trimline (p) + 1, "BIGINT"))
-    {
-      return CCI_U_TYPE_STRING;
-    }
-  if (startswithCI (trimline (p) + 1, "BLOB"))
-    {
-      return CCI_U_TYPE_BLOB;
-    }
-  if (startswithCI (trimline (p) + 1, "CLOB"))
-    {
-      return CCI_U_TYPE_CLOB;
-    }
-  if (startswithCI (trimline (p) + 1, "SMALLINT"))
-    {
-      return CCI_U_TYPE_INT;
-    }
-
-  return CCI_U_TYPE_STRING;
-}
-
-T_CCI_A_TYPE
-getatype (T_CCI_U_TYPE utype)
-{
-  switch (utype)
-    {
-    case CCI_U_TYPE_CHAR:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_STRING:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_NCHAR:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_VARNCHAR:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_BIT:
-      return CCI_A_TYPE_BIT;
-    case CCI_U_TYPE_VARBIT:
-      return CCI_A_TYPE_BIT;
-    case CCI_U_TYPE_NUMERIC:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_INT:
-      return CCI_A_TYPE_INT;
-    case CCI_U_TYPE_SHORT:
-      return CCI_A_TYPE_INT;
-    case CCI_U_TYPE_MONETARY:
-      return CCI_A_TYPE_DOUBLE;
-    case CCI_U_TYPE_FLOAT:
-      return CCI_A_TYPE_FLOAT;
-    case CCI_U_TYPE_DOUBLE:
-      return CCI_A_TYPE_DOUBLE;
-    /*
-     * The value of a DATE, TIME, TIMESTAMP, DATETIME or BIGINT parameter is bound as the text of the
-     * script, and the server converts it to the type: executebindparameter() passes the text, not a
-     * T_CCI_DATE or an INT64.
-     */
-    case CCI_U_TYPE_DATE:
-    case CCI_U_TYPE_TIME:
-    case CCI_U_TYPE_TIMESTAMP:
-    case CCI_U_TYPE_DATETIME:
-    case CCI_U_TYPE_BIGINT:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_OBJECT:
-      return CCI_A_TYPE_STR;
-    case CCI_U_TYPE_BLOB:
-      return CCI_A_TYPE_BLOB;
-    case CCI_U_TYPE_CLOB:
-      return CCI_A_TYPE_CLOB;
-    default:
-      return CCI_A_TYPE_STR;
-    }
-}
-
 int
 endswithsemicolon (char *source)
 {
@@ -1125,59 +942,6 @@ endswithsemicolon (char *source)
     return 1;
 
   return 0;
-}
-
-char *
-getvalue (char *p)
-{
-  if (strlen (p) < 1)
-    {
-      return NULL;
-    }
-  char *temp = trimline (p);
-
-  if (endswithsemicolon (temp))
-    {
-      p[strlen (p) - 1] = 0;
-    }
-
-  return p + 1;
-}
-
-void
-get_value_by_type (char *str, char *type, void *buf)
-{
-  char *p = NULL;
-  char *temp = NULL;
-
-  p = str;
-  if (strlen (p) < 1)
-    memcpy (buf, (void *) p, sizeof (char));
-
-  temp = trimline (p);
-  if (endswithsemicolon (temp))
-    p[strlen (p) - 1] = 0;
-  //remove $ character
-  p = p + 1;
-
-  if (strcmp (type, "int") == 0)
-    {
-      int i;
-      i = atoi (p);
-      memcpy (buf, (void *) &i, sizeof (int));
-    }
-  else if (strcmp (type, "float") == 0)
-    {
-      float f;
-      f = atof (p);
-      memcpy (buf, (void *) &f, sizeof (float));
-    }
-  else if (strcmp (type, "double") == 0)
-    {
-      double d;
-      d = atof (p);
-      memcpy (buf, (void *) &d, sizeof (double));
-    }
 }
 
 int
@@ -1196,88 +960,334 @@ startswithCI (char *source, char *str)
   return ((ret == 0) ? 1 : 0);
 }
 
-int
-ParStrLen (char *dest, char c)
+/*
+ * The parameters of a statement bound as cqt binds them (SQLParser.getParamList, CubridUtil.getSqlType
+ * and getObject, ConsoleDAO.executePrepareStatement and executeCall). The types cqt knows, by the
+ * whole name, upper case; any other name (NUMERIC[6,4], DATETIME, BIGINT, CHAR(10) ...) is OTHER.
+ */
+enum { JT_CHAR, JT_VARCHAR, JT_BIT, JT_NUMERIC, JT_INTEGER, JT_SMALLINT, JT_FLOAT, JT_DOUBLE, JT_DATE, JT_TIME,
+  JT_TIMESTAMP, JT_NULL, JT_OTHER };
+
+static int
+jsql_type (const char *name)
 {
-  int temp = 0;
-  int i = 0;
-  for (i = 0; dest[i] != '\0'; i++)
-    {
-      if (dest[i] == c)
-	temp++;
-    }
-  return temp;
+  static const struct { const char *n; int t; } m[] = {
+    {"CHAR", JT_CHAR}, {"VARCHAR", JT_VARCHAR}, {"STRING", JT_VARCHAR}, {"NCHAR", JT_CHAR}, {"BIT", JT_BIT},
+    {"BIT VARYING", JT_BIT}, {"NUMERIC", JT_NUMERIC}, {"DECIMAL", JT_NUMERIC}, {"INTEGER", JT_INTEGER},
+    {"INT", JT_INTEGER}, {"SMALLINT", JT_SMALLINT}, {"MONETARY", JT_VARCHAR}, {"FLOAT", JT_FLOAT},
+    {"REAL", JT_FLOAT}, {"DOUBLE PRECISION", JT_DOUBLE}, {"DOUBLE", JT_DOUBLE}, {"DATE", JT_DATE},
+    {"TIME", JT_TIME}, {"TIMESTAMP", JT_TIMESTAMP}, {"NULL", JT_NULL}
+  };
+  size_t i;
+  if (*name == '\0')
+    return JT_VARCHAR;
+  for (i = 0; i < sizeof (m) / sizeof (m[0]); i++)
+    if (strcasecmp (name, m[i].n) == 0)
+      return m[i].t;
+  return JT_OTHER;
 }
 
-int
-executebindparameter (int req, char *str, int n)
+/* Integer.parseInt: an optional sign and digits only */
+static int
+java_parse_int (const char *s, long *out)
 {
-  T_CCI_U_TYPE utype = CCI_U_TYPE_NULL;
-  int res = 0;
-  char *p;
-  T_CCI_A_TYPE atype = CCI_A_TYPE_STR;
-  const char *split = ",";
-  int parLen = ParStrLen (str, '$');
-  T_CCI_BIT value;
-
-  /* fewer values than parameters: bind the ones given and let cci_execute() refuse the rest, as JDBC does */
-  if (parLen / 2 > n)
+  const char *p = s;
+  if (*p == '+' || *p == '-')
+    p++;
+  if (*p == '\0')
     return 0;
+  for (; *p; p++)
+    if (!isdigit ((unsigned char) *p))
+      return 0;
+  *out = strtol (s, NULL, 10);
+  return 1;
+}
 
-  p = strtok (str, split);
-  parLen = 0;
-  while (p != NULL)
+static int
+java_digits_part (const char *s, int from, int to, long *out)
+{
+  char b[64];
+  if (to - from <= 0 || to - from >= (int) sizeof (b))
+    return 0;
+  memcpy (b, s + from, to - from);
+  b[to - from] = '\0';
+  return java_parse_int (b, out);
+}
+
+static int
+index_of (const char *s, char c, int from)
+{
+  const char *p;
+  if (from < 0 || from > (int) strlen (s))
+    return -1;
+  p = strchr (s + from, c);
+  return p ? (int) (p - s) : -1;
+}
+
+/* java.sql.Date.valueOf */
+static int
+java_date_valueof (const char *s, long *y, long *m, long *d)
+{
+  int n = strlen (s), d1 = index_of (s, '-', 0), d2 = index_of (s, '-', d1 + 1);
+  if (d1 > 0 && d2 > 0 && d2 < n - 1 && d1 == 4 && d2 - d1 - 1 >= 1 && d2 - d1 - 1 <= 2 && n - d2 - 1 >= 1
+      && n - d2 - 1 <= 2 && java_digits_part (s, 0, d1, y) && java_digits_part (s, d1 + 1, d2, m)
+      && java_digits_part (s, d2 + 1, n, d) && *m >= 1 && *m <= 12 && *d >= 1 && *d <= 31)
+    return 1;
+  return 0;
+}
+
+/* java.sql.Time.valueOf */
+static int
+java_time_valueof (const char *s, long *h, long *mi, long *se)
+{
+  int n = strlen (s), c1 = index_of (s, ':', 0), c2 = index_of (s, ':', c1 + 1);
+  return c1 > 0 && c2 > 0 && c2 < n - 1 && java_digits_part (s, 0, c1, h) && java_digits_part (s, c1 + 1, c2, mi)
+    && java_digits_part (s, c2 + 1, n, se);
+}
+
+/* java.sql.Timestamp.valueOf: yyyy-[m]m-[d]d hh:mm:ss[.f...] */
+static int
+java_timestamp_valueof (const char *src, long f[6], long *nanos)
+{
+  char s[256], ds[128], ts[128];
+  int sp, n, p;
+  strncpy (s, src, sizeof (s) - 1);
+  s[sizeof (s) - 1] = '\0';
+  trimline (s);
+  sp = index_of (s, ' ', 0);
+  if (sp <= 0 || sp >= (int) sizeof (ds))
+    return 0;
+  memcpy (ds, s, sp);
+  ds[sp] = '\0';
+  snprintf (ts, sizeof (ts), "%s", s + sp + 1);
+  if (!java_date_valueof (ds, &f[0], &f[1], &f[2]))
+    return 0;
+  n = strlen (ts);
+  {
+    int c1 = index_of (ts, ':', 0), c2 = index_of (ts, ':', c1 + 1);
+    if (!(c1 > 0 && c2 > 0 && c2 < n - 1))
+      return 0;
+    p = index_of (ts, '.', c2 + 1);
+    if (!java_digits_part (ts, 0, c1, &f[3]) || !java_digits_part (ts, c1 + 1, c2, &f[4]))
+      return 0;
+    *nanos = 0;
+    if (p > 0 && p < n - 1)
+      {
+	int k, len = n - p - 1;
+	if (len > 9 || !java_digits_part (ts, c2 + 1, p, &f[5]))
+	  return 0;
+	for (k = p + 1; k < n; k++)
+	  if (!isdigit ((unsigned char) ts[k]))
+	    return 0;
+	*nanos = strtol (ts + p + 1, NULL, 10);
+	for (k = len; k < 9; k++)
+	  *nanos *= 10;
+      }
+    else if (p > 0)
+      return 0;
+    else if (!java_digits_part (ts, c2 + 1, n, &f[5]))
+      return 0;
+  }
+  return 1;
+}
+
+/* the fields of a java.util.Date built leniently from these (2010-02-31 is 2010-03-03), as the JDBC driver sends them */
+static void
+lenient (T_CCI_DATE * d, long y, long mo, long da, long h, long mi, long se, long ms)
+{
+  struct tm tm;
+  time_t t;
+  memset (&tm, 0, sizeof (tm));
+  tm.tm_year = y - 1900;
+  tm.tm_mon = mo - 1;
+  tm.tm_mday = da;
+  tm.tm_hour = h;
+  tm.tm_min = mi;
+  tm.tm_sec = se;
+  tm.tm_isdst = -1;
+  t = mktime (&tm);
+  localtime_r (&t, &tm);
+  memset (d, 0, sizeof (*d));
+  d->yr = tm.tm_year + 1900;
+  d->mon = tm.tm_mon + 1;
+  d->day = tm.tm_mday;
+  d->hh = tm.tm_hour;
+  d->mm = tm.tm_min;
+  d->ss = tm.tm_sec;
+  d->ms = ms;
+}
+
+/*
+ * Binds the values of a line "$type, $value, ..." to req. The line is split as cqt splits it, at a
+ * comma that spaces and a '$' follow, so a value may hold a comma. A value "null" (any case) or the
+ * type NULL binds a NULL (setNull).
+ *  - a statement (is_call 0), as executePrepareStatement: a value with an IN: or OUT: prefix is not
+ *    bound; CHAR, VARCHAR (MONETARY) as a string, NUMERIC and DOUBLE as a double, INT, SMALLINT,
+ *    FLOAT by their type, DATE, TIME, TIMESTAMP through Date/Time/Timestamp.valueOf (a TIMESTAMP goes
+ *    as a DATETIME, as the driver sends a java.sql.Timestamp), BIT and OTHER as a string (setObject
+ *    of a String);
+ *  - a CALL (is_call 1), as executeCall: setObject of the value (DATE, TIME and TIMESTAMP stay
+ *    strings); a value with an OUT prefix is registered, and its position goes to outs.
+ * Returns 1, or -1 when cqt fails before it executes (valueOf throws, cqt prints Error:-10000).
+ * A value that CCI does not take is left unbound, so that cci_execute() refuses the statement.
+ */
+static int
+bind_parameters (int req, const char *param_line, int is_call, int *outs, int *n_outs)
+{
+  char line[MAX_SQL_LEN];
+  char *parts[512];
+  int np = 0, i, len;
+  char *p, *start;
+
+  if (param_line == NULL)
     {
-      if (!(parLen % 2))
+      return 1;
+    }
+  snprintf (line, sizeof (line), "%s", param_line);
+  len = strlen (line);
+  if (len > 0 && line[len - 1] == ';')
+    line[--len] = '\0';
+  /* split by ",( )*\$" */
+  start = line;
+  for (p = line; *p && np < 510; p++)
+    {
+      if (*p == ',')
 	{
-	  if (startswithCI (p, "$OUT:"))
+	  char *q = p + 1;
+	  while (*q == ' ')
+	    q++;
+	  if (*q == '$')
 	    {
-	      parLen = parLen + 2;
-	      p = strtok (NULL, split);
-	      p = strtok (NULL, split);
+	      *p = '\0';
+	      parts[np++] = start;
+	      start = q + 1;
+	      p = q;
+	    }
+	}
+    }
+  parts[np++] = start;
+  if (np % 2 != 0)
+    parts[np++] = "";		/* "..., $" at the end: an empty value */
+  if (parts[0][0] == '$')
+    parts[0]++;
+
+  for (i = 0; i + 1 < np; i += 2)
+    {
+      char tn[256], *colon, *ptype = NULL;
+      const char *v = parts[i + 1];
+      int idx = i / 2 + 1, jt, isnull, res = 0, k;
+
+      snprintf (tn, sizeof (tn), "%s", parts[i]);
+      trimline (tn);
+      for (k = 0; tn[k] != '\0'; k++)
+	{
+	  tn[k] = (char) toupper ((unsigned char) tn[k]);
+	}
+      colon = strchr (tn, ':');
+      if (colon)
+	{
+	  *colon = '\0';
+	  ptype = tn;
+	  jt = jsql_type (colon + 1);
+	}
+      else
+	jt = jsql_type (tn);
+      isnull = jt == JT_NULL || strcasecmp (v, "null") == 0;
+
+      if (is_call)
+	{
+	  if (ptype != NULL && strncmp (ptype, "IN", 2) != 0)
+	    {
+	      if (strstr (ptype, "OUT") != NULL && *n_outs < 256)
+		{
+		  outs[(*n_outs)++] = idx;
+		}
 	      continue;
 	    }
-	  utype = getutype (p);
-	  atype = getatype (utype);
+	  if (isnull)
+	    res = cci_bind_param (req, idx, CCI_A_TYPE_STR, NULL, CCI_U_TYPE_NULL, 0);
+	  else if (jt == JT_INTEGER)
+	    {
+	      int x = atoi (v);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_INT, &x, CCI_U_TYPE_INT, CCI_BIND_PTR);
+	    }
+	  else if (jt == JT_SMALLINT)
+	    {
+	      int x = atoi (v);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_INT, &x, CCI_U_TYPE_SHORT, CCI_BIND_PTR);
+	    }
+	  else if (jt == JT_FLOAT)
+	    {
+	      float x = strtof (v, NULL);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_FLOAT, &x, CCI_U_TYPE_FLOAT, CCI_BIND_PTR);
+	    }
+	  else if (jt == JT_NUMERIC || jt == JT_DOUBLE)
+	    {
+	      double x = strtod (v, NULL);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_DOUBLE, &x, CCI_U_TYPE_DOUBLE, CCI_BIND_PTR);
+	    }
+	  else
+	    res = cci_bind_param (req, idx, CCI_A_TYPE_STR, (void *) v, CCI_U_TYPE_STRING, CCI_BIND_PTR);
 	}
       else
 	{
-	  if (atype == CCI_A_TYPE_BIT)
+	  if (ptype != NULL)
+	    continue;		/* executePrepareStatement binds only the parameters without IN:/OUT: */
+	  if (isnull)
+	    res = cci_bind_param (req, idx, CCI_A_TYPE_STR, NULL, CCI_U_TYPE_NULL, 0);
+	  else if (jt == JT_CHAR || jt == JT_VARCHAR || jt == JT_BIT || jt == JT_OTHER)
+	    res = cci_bind_param (req, idx, CCI_A_TYPE_STR, (void *) v, CCI_U_TYPE_STRING, CCI_BIND_PTR);
+	  else if (jt == JT_NUMERIC || jt == JT_DOUBLE)
 	    {
-	      value.buf = getvalue (p);
-	      value.size = strlen (getvalue (p));
-	      res = cci_bind_param (req, (parLen / 2 + 1), atype, &value, utype, CCI_BIND_PTR);
+	      double x = strtod (v, NULL);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_DOUBLE, &x, CCI_U_TYPE_DOUBLE, CCI_BIND_PTR);
 	    }
-	  else if (atype == CCI_A_TYPE_INT)
+	  else if (jt == JT_INTEGER)
 	    {
-	      int x = 0;
-	      get_value_by_type (p, "int", (void *) &x);
-	      res = cci_bind_param (req, (parLen / 2 + 1), atype, &x, utype, CCI_BIND_PTR);
-
+	      int x = atoi (v);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_INT, &x, CCI_U_TYPE_INT, CCI_BIND_PTR);
 	    }
-	  else if (atype == CCI_A_TYPE_FLOAT)
+	  else if (jt == JT_SMALLINT)
 	    {
-	      float f = 0;
-	      get_value_by_type (p, "float", (void *) &f);
-	      res = cci_bind_param (req, (parLen / 2 + 1), atype, &f, utype, CCI_BIND_PTR);
-
+	      int x = atoi (v);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_INT, &x, CCI_U_TYPE_SHORT, CCI_BIND_PTR);
 	    }
-	  else if (atype == CCI_A_TYPE_DOUBLE)
+	  else if (jt == JT_FLOAT)
 	    {
-	      double d = 0;
-	      get_value_by_type (p, "double", (void *) &d);
-	      res = cci_bind_param (req, (parLen / 2 + 1), atype, &d, utype, CCI_BIND_PTR);
+	      float x = strtof (v, NULL);
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_FLOAT, &x, CCI_U_TYPE_FLOAT, CCI_BIND_PTR);
 	    }
 	  else
 	    {
-	      res = cci_bind_param (req, (parLen / 2 + 1), atype, getvalue (p), utype, CCI_BIND_PTR);
+	      T_CCI_DATE d;
+	      long f[6] = { 0 }, nanos = 0;
+	      T_CCI_U_TYPE ut;
+	      if (jt == JT_DATE)
+		{
+		  if (!java_date_valueof (v, &f[0], &f[1], &f[2]))
+		    return -1;
+		  lenient (&d, f[0], f[1], f[2], 0, 0, 0, 0);
+		  d.hh = d.mm = d.ss = 0;
+		  ut = CCI_U_TYPE_DATE;
+		}
+	      else if (jt == JT_TIME)
+		{
+		  if (!java_time_valueof (v, &f[3], &f[4], &f[5]))
+		    return -1;
+		  lenient (&d, 1970, 1, 1, f[3], f[4], f[5], 0);
+		  ut = CCI_U_TYPE_TIME;
+		}
+	      else
+		{
+		  if (!java_timestamp_valueof (v, f, &nanos))
+		    return -1;
+		  lenient (&d, f[0], f[1], f[2], f[3], f[4], f[5], nanos / 1000000);
+		  ut = CCI_U_TYPE_DATETIME;
+		}
+	      res = cci_bind_param (req, idx, CCI_A_TYPE_DATE, &d, ut, CCI_BIND_PTR);
 	    }
-
-	  if (res < 0)
-	    return 0;
 	}
-      parLen++;
-      p = strtok (NULL, split);
+      (void) res;
     }
   return 1;
 }
@@ -2462,12 +2472,15 @@ int
 executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
 {
   static int seq = 0;
-  int bnum = 0i, ind;
-  int out_count = 0;
+  int ind;
   int req = 0;
   int res = 0;
   int ret = 0;
   int execute_result = 0;
+  int bound;
+  int outs[256];
+  int n_outs = 0;
+  int i;
   T_CCI_ERROR error;
   int col_count = 0, t = 0;
   char *buffer;
@@ -2511,18 +2524,17 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
       goto _END;
     }
 
-  bnum = cci_get_bind_num (req);
-  if (!executebindparameter (req, param, bnum))
+  bound = bind_parameters (req, param, iscall, outs, &n_outs);
+  if (bound < 0)
     {
-      fprintf (stdout, "bind parameter error\n");
+      /* cqt fails before it executes: Date/Time/Timestamp.valueOf() throws on the value */
+      fprintf (fp, "Error:-10000\n");
       ret = -1;
       goto _END;
     }
-
-  out_count = get_out_num_by_str (param);
-  for (t = 1; t <= out_count; t++)
+  for (i = 0; i < n_outs; i++)
     {
-      if ((cci_register_out_param (req, t)) < 0)
+      if (cci_register_out_param (req, outs[i]) < 0)
 	{
 	  fprintf (stdout, "register parameter error\n");
 	  ret = -1;
@@ -2530,6 +2542,7 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
 	}
     }
 
+  /* a value CCI did not take leaves its parameter unbound: cci_execute() then refuses, as JDBC does */
   res = cci_execute (req, CCI_EXEC_QUERY_ALL, 0, &error);
   executed = true;
   if (res < 0)
@@ -2553,15 +2566,15 @@ executebind (FILE * fp, char conn, char *param, const SqlStateStruce *pSqlState)
   if (iscall)
     {
       //print call statement column name
-      for (t = 1; t <= out_count; t++)
+      for (t = 1; t <= n_outs; t++)
 	{
 	  if (t == 1)
 	    {
-	      fprintf (fp, "%d", out_count);
+	      fprintf (fp, "%d", n_outs);
 	    }
 	  else
 	    {
-	      fprintf (fp, " %d", out_count);
+	      fprintf (fp, " %d", n_outs);
 	    }
 	}
       fprintf (fp, "\n");
