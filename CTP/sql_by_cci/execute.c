@@ -26,6 +26,7 @@
 
 #define _GNU_SOURCE
 #include <stdio.h>
+#include <iconv.h>
 #include <ctype.h>
 #include <strings.h>
 #include <string.h>
@@ -575,6 +576,72 @@ put_replacement (FILE * fp)
   fputs ("\xEF\xBF\xBD", fp);	/* U+FFFD in UTF-8 */
 }
 
+/*
+ * EUC-KR as the JDK EUC_KR decoder (sun.nio.cs.ext.DoubleByte) reads it, in UTF-8. A pair that
+ * KS X 1001 maps is its character (glibc iconv). Otherwise U+FFFD, for both bytes only when the
+ * first leads a row that has a character and the second is not a single byte and leads no such row
+ * (DoubleByte.Decoder.crMalformedOrUnmappable), else for the first byte alone.
+ */
+static iconv_t euckr_cd = (iconv_t) - 1;
+static char euckr_lead[256];
+
+static int
+euckr_pair (unsigned char a, unsigned char b, char *out, size_t *out_len)
+{
+  char in[2], u4[8];
+  char *ip = in, *op = u4;
+  size_t il = 2, ol = sizeof (u4);
+  unsigned long cp;
+
+  in[0] = (char) a;
+  in[1] = (char) b;
+  iconv (euckr_cd, NULL, NULL, NULL, NULL);
+  /* exactly one character for the two bytes */
+  if (iconv (euckr_cd, &ip, &il, &op, &ol) == (size_t) - 1 || il != 0 || op - u4 != 4)
+    {
+      return 0;
+    }
+  cp = ((unsigned long) (unsigned char) u4[0] << 24) | ((unsigned char) u4[1] << 16) | ((unsigned char) u4[2] << 8)
+    | (unsigned char) u4[3];
+  if (cp < 0x800)
+    {
+      out[0] = (char) (0xC0 | (cp >> 6));
+      out[1] = (char) (0x80 | (cp & 0x3F));
+      *out_len = 2;
+    }
+  else
+    {
+      out[0] = (char) (0xE0 | (cp >> 12));
+      out[1] = (char) (0x80 | ((cp >> 6) & 0x3F));
+      out[2] = (char) (0x80 | (cp & 0x3F));
+      *out_len = 3;
+    }
+  return 1;
+}
+
+static int
+put_euckr (FILE * fp, const unsigned char *p, int n)
+{
+  char u[8];
+  size_t ul;
+  int x, y;
+
+  if (euckr_cd == (iconv_t) - 1)
+    {
+      euckr_cd = iconv_open ("UCS-4BE", "EUC-KR");
+      for (x = 0x80; x < 0x100 && euckr_cd != (iconv_t) - 1; x++)
+	for (y = 0x80; y < 0x100 && !euckr_lead[x]; y++)
+	  euckr_lead[x] = (char) euckr_pair ((unsigned char) x, (unsigned char) y, u, &ul);
+    }
+  if (n >= 2 && euckr_cd != (iconv_t) - 1 && euckr_pair (p[0], p[1], u, &ul))
+    {
+      fwrite (u, 1, ul, fp);
+      return 2;
+    }
+  put_replacement (fp);
+  return (n >= 2 && euckr_lead[p[0]] && p[1] >= 0x80 && !euckr_lead[p[1]]) ? 2 : 1;
+}
+
 /* the length of the valid UTF-8 prefix of the sequence at p (at most n bytes), and whether it is complete */
 static int
 utf8_prefix (const unsigned char *p, int n, int *complete)
@@ -658,9 +725,7 @@ print_java_string (FILE * fp, const char *value, int len, int charset)
 	}
       else if (charset == CCI_CS_EUC_KR)
 	{
-	  /* EUC-KR is passed on as CCI gives it: decoding it needs the KS X 1001 table */
-	  fputc (p[i], fp);
-	  n = 1;
+	  n = put_euckr (fp, p + i, len - i);
 	}
       else
 	{
