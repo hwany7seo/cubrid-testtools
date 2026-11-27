@@ -68,6 +68,7 @@ typedef struct SqlStateStruct
   };
 
   bool iscallwithoutvalue;
+  char *connname;		/* the connection the statement names ("@t1: ..."), NULL when none */
 } SqlStateStruce;
 
 extern int is_statement_end ();
@@ -1502,6 +1503,8 @@ readFile (char *fileName)
   char line[MAX_SQL_LEN];
   char sql_buf[MAXLINELENGH];
   bool hasqp = 0, hasjg = 0, hasfullp = 0;
+  bool new_stmt = 1;
+  char connname[MAX_LEN] = "";
 
   //initial the total sql count.
   total_sql = 0;
@@ -1544,6 +1547,7 @@ readFile (char *fileName)
 		  sqlstate[total_sql].hasfullp = 0;
 		  //if script like "? = call"
 		  sqlstate[total_sql].iscallwithoutvalue = 0;
+		  sqlstate[total_sql].connname = NULL;
 
 		  total_sql++;
 		}
@@ -1556,19 +1560,39 @@ readFile (char *fileName)
 	  else
 	    {
 	      // statement
-	      char *p = sql_buf + sql_len;
-	      sql_len += strlen (line) + 1;
+	      char *text = line;
+	      char *p;
+
+	      /*
+	       * As cqt reads it (SQLParser): when the first line of a statement starts with '@', the part up to
+	       * the first ':' names the connection that runs the statement ("@t1: insert ..."), and the rest of
+	       * the line is the statement.
+	       */
+	      if (new_stmt && line[0] == '@')
+		{
+		  char *colon = strchr (line, ':');
+		  if (colon != NULL)
+		    {
+		      snprintf (connname, sizeof (connname), "%.*s", (int) (colon - line - 1), line + 1);
+		      for (text = colon + 1; *text == ' ' || *text == '\t'; text++)
+			;
+		    }
+		}
+	      new_stmt = 0;
+
+	      p = sql_buf + sql_len;
+	      sql_len += strlen (text) + 1;
 	      if (sql_len >= MAXLINELENGH)
 		{
 		  printf ("The sql statment is too long \n");
 		  exit (1);
 		}
-	      sprintf (p, "%s\n", line);
+	      sprintf (p, "%s\n", text);
 
-	      scan_line (line);
+	      scan_line (text);
 	      // the following condition should be replaced with is_statement_end()
 	      // but it hugely alters the test results.
-	      if (endswithsemicolon (line) && !is_in_plcsql_text ())
+	      if (endswithsemicolon (text) && !is_in_plcsql_text ())
 		{
 		  sqlstate[total_sql].sql = (char *) malloc (sizeof (char) * sql_len + 1);
 		  strcpy (sqlstate[total_sql].sql, sql_buf);
@@ -1576,7 +1600,8 @@ readFile (char *fileName)
 		  sqlstate[total_sql].onlyjg = hasjg;
 		  sqlstate[total_sql].hasfullp = hasfullp;
 		  //if script like "? = call"
-		  sqlstate[total_sql].iscallwithoutvalue = startswith (line, "?");
+		  sqlstate[total_sql].iscallwithoutvalue = startswith (text, "?");
+		  sqlstate[total_sql].connname = connname[0] != '\0' ? strdup (connname) : NULL;
 
 		  total_sql++;
 
@@ -1585,6 +1610,8 @@ readFile (char *fileName)
 		  hasqp = 0;
 		  hasjg = 0;
 		  hasfullp = 0;
+		  connname[0] = '\0';
+		  new_stmt = 1;
 		}
 
 	      if (is_statement_end ())
@@ -2954,10 +2981,73 @@ reset_system_parameters (int conn)
   free (sql);
 }
 
+/*
+ * The connections that the statements of a script name ("@t1: ..."), kept as cqt keeps them (ConsoleBO,
+ * CubridConnManager): "default" is the script's own connection; any other name gets its own connection
+ * with the same URL on its first statement, reset as the first one (resetConnection). A statement that
+ * names no connection runs on the connection of the statement before it. At the end of the script cqt
+ * commits every connection; the named ones are committed and closed here.
+ */
+#define MAX_NAMED_CONN 16
+static struct
+{
+  char name[MAX_LEN];
+  int conn;
+} named_conn[MAX_NAMED_CONN];
+static int n_named_conn = 0;
+
+static int
+named_connection (int main_conn, const char *name)
+{
+  int i, conn;
+
+  if (strcmp (name, "default") == 0)
+    {
+      return main_conn;
+    }
+  for (i = 0; i < n_named_conn; i++)
+    {
+      if (strcmp (named_conn[i].name, name) == 0)
+	{
+	  return named_conn[i].conn;
+	}
+    }
+  if (n_named_conn >= MAX_NAMED_CONN)
+    {
+      fprintf (stdout, "connection %s: more than %d named connections\n", name, MAX_NAMED_CONN);
+      return -1;
+    }
+  conn = cci_connect_with_url (url, user, passwd);
+  if (conn < 0)
+    {
+      fprintf (stdout, "connection %s: cci_connect_with_url error %d (%s)\n", name, conn, get_err_msg (conn));
+      return -1;
+    }
+  reset_system_parameters (conn);
+  snprintf (named_conn[n_named_conn].name, sizeof (named_conn[n_named_conn].name), "%s", name);
+  named_conn[n_named_conn].conn = conn;
+  n_named_conn++;
+  return conn;
+}
+
+static void
+close_named_connections (void)
+{
+  int i;
+  T_CCI_ERROR error;
+
+  for (i = 0; i < n_named_conn; i++)
+    {
+      cci_end_tran (named_conn[i].conn, CCI_TRAN_COMMIT, &error);
+      cci_disconnect (named_conn[i].conn, &error);
+    }
+  n_named_conn = 0;
+}
+
 int
 test (FILE * fp)
 {
-  int conn = -1, req = 0, res = 0;
+  int conn = -1, main_conn = -1, req = 0, res = 0;
   int sql_count = 0, length = 0, count = 0;
   int MAX_RETRY_COUNT = 50;
   T_CCI_ERROR error;
@@ -2986,9 +3076,18 @@ test (FILE * fp)
     }
 
   reset_system_parameters (conn);
+  main_conn = conn;
 
   for (sql_count = 0; sql_count < total_sql; sql_count++)
     {
+      if (sqlstate[sql_count].connname != NULL)
+	{
+	  int named = named_connection (main_conn, sqlstate[sql_count].connname);
+	  if (named >= 0)
+	    {
+	      conn = named;
+	    }
+	}
       if ((length = strlen (sqlstate[sql_count].sql)) <= 2)
 	{
 	  continue;
@@ -3142,6 +3241,8 @@ test (FILE * fp)
     }
 
   //release
+  close_named_connections ();
+  conn = main_conn;
   if ((res = cci_disconnect (conn, &error)) < 0)
     {
       goto _END;
@@ -3153,11 +3254,13 @@ test (FILE * fp)
 	free (sqlstate[sql_count].sql);
       if (parameter[sql_count] != NULL)
 	free (parameter[sql_count]);
+      free (sqlstate[sql_count].connname);
     }
   return 0;
 _END:
   if (req > 0)
     cci_close_req_handle (req);
+  close_named_connections ();
   if (conn > 0)
     res = cci_disconnect (conn, &error);
   for (sql_count = 0; sql_count < total_sql; sql_count++)
@@ -3166,6 +3269,7 @@ _END:
 	free (sqlstate[sql_count].sql);
       if (parameter[sql_count] != NULL)
 	free (parameter[sql_count]);
+      free (sqlstate[sql_count].connname);
     }
   return -1;
 }
@@ -3388,6 +3492,7 @@ main (int argc, char *argv[])
     {
       sqlstate[sql_count].sql = NULL;
       sqlstate[sql_count].hasqp = 0;
+      sqlstate[sql_count].connname = NULL;
       parameter[sql_count] = NULL;
     }
 
